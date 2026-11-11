@@ -67,9 +67,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateAccountNavigation() {
-        const signInLink = document.getElementById('sign-in');
-        signInLink.textContent = currentUser ? 'ĐĂNG XUẤT' : 'ĐĂNG NHẬP';
-        signInLink.title = currentUser ? currentUser.email : 'Đăng nhập hoặc tạo tài khoản';
+        const accountLink = document.getElementById('account-profile-button');
+        const displayName = currentUser && (currentUser.displayName || currentUser.email);
+        accountLink.textContent = displayName || 'ĐĂNG NHẬP';
+        accountLink.title = currentUser
+            ? 'Mở thông tin tài khoản'
+            : 'Đăng nhập hoặc tạo tài khoản';
+        document.getElementById('sign-out').classList.toggle('hidden', !currentUser || readOnlyView);
         document.getElementById('my-schedules').classList.toggle('hidden', readOnlyView);
     }
 
@@ -913,9 +917,13 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
     });
+    window.addEventListener('afterprint', () => {
+        document.body.classList.remove('print-standings-mode');
+    });
     document.getElementById('schedule-tab-button').addEventListener('click', () => {
         matchList.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
+    document.getElementById('shared-standings-button').addEventListener('click', () => openModal('standings'));
     document.getElementById('share-button').addEventListener('click', shareSchedule);
     document.getElementById('save-league-button').addEventListener('click', () => {
         if (readOnlyView) return;
@@ -925,13 +933,17 @@ document.addEventListener('DOMContentLoaded', () => {
         event.preventDefault();
         openMySchedules();
     });
-    document.getElementById('sign-in').addEventListener('click', event => {
+    document.getElementById('account-profile-button').addEventListener('click', event => {
         event.preventDefault();
-        if (currentUser) signOutUser();
+        if (currentUser) openModal('account-profile');
         else {
             authMode = 'signin';
             openModal('auth');
         }
+    });
+    document.getElementById('sign-out').addEventListener('click', event => {
+        event.preventDefault();
+        void signOutUser();
     });
     teamFilter.addEventListener('change', renderSchedule);
     matchList.addEventListener('click', event => {
@@ -1028,6 +1040,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (teamLink) {
             closeModal();
             openTeamPage(teamLink.dataset.teamPage);
+            return;
+        }
+        if (event.target.closest('[data-action="print-standings"]')) {
+            document.body.classList.add('print-standings-mode');
+            window.print();
             return;
         }
         void handleModalAction(event);
@@ -1671,6 +1688,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const draftBadge = document.getElementById('draft-badge');
         if (draftBadge) draftBadge.classList.toggle('hidden', !state.draft);
         document.getElementById('readonly-badge').classList.toggle('hidden', !readOnlyView);
+        document.getElementById('shared-standings-button').classList.toggle('hidden', !readOnlyView);
         const teamProfile = document.getElementById('team-profile');
         teamProfile.classList.toggle('hidden', !activeTeamName);
         if (activeTeamName) renderTeamProfile(activeTeamName);
@@ -1723,7 +1741,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? `<div class="bye-row"><i class="fa-regular fa-moon"></i><strong>Đội nghỉ:</strong> ${byes.map(team => escapeHtml(team)).join(' · ')}</div>`
                 : '';
             const roundSchedule = getRoundSchedule(round);
-            const roundDateTime = roundSchedule.date || roundSchedule.time
+            const hasRoundSchedule = Boolean(roundSchedule.date || roundSchedule.time);
+            const roundDateTime = hasRoundSchedule
                 ? formatMatchDateTime(roundSchedule.date, roundSchedule.time)
                 : 'Thêm ngày giờ';
             const randomResults = state.matches.filter(match =>
@@ -1739,7 +1758,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     <h2>Vòng ${round}</h2>
                     <div class="round-heading-actions">
                         ${readOnlyView
-                            ? `<span class="round-schedule-public"><i class="fa-regular fa-calendar-days"></i> ${escapeHtml(roundDateTime)}</span>`
+                            ? (hasRoundSchedule
+                                ? `<span class="round-schedule-public"><i class="fa-regular fa-calendar-days"></i> ${escapeHtml(roundDateTime)}</span>`
+                                : '')
                             : `<button class="round-schedule-button" type="button" data-round-schedule="${round}" aria-label="Cài ngày giờ vòng ${round}">
                                 <i class="fa-regular fa-calendar-days"></i> ${escapeHtml(roundDateTime)}
                             </button>
@@ -1930,7 +1951,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 <span class="${hasResult ? 'match-score' : 'versus'}">${hasResult ? `${game.homeScore} – ${game.awayScore}` : 'v'}</span>
                 <span class="advance-fixture-team">${escapeHtml(game.away)}</span>
             </span>
-            <span class="advance-fixture-date${schedule ? '' : ' advance-fixture-date-empty'}"><i class="fa-regular fa-clock"></i> ${escapeHtml(schedule || (isEditable ? 'Thêm ngày giờ' : 'Chưa xếp lịch'))}</span>
+            ${schedule || !readOnlyView
+                ? `<span class="advance-fixture-date${schedule ? '' : ' advance-fixture-date-empty'}"><i class="fa-regular fa-clock"></i> ${escapeHtml(schedule || 'Thêm ngày giờ')}</span>`
+                : ''}
         </button>`;
     }
 
@@ -2009,23 +2032,72 @@ document.addEventListener('DOMContentLoaded', () => {
         const byeRounds = Array.from({ length: state.rounds }, (_, index) => index + 1).filter(round => !roundsPlayed.has(round));
         const teamMatches = state.matches
             .filter(match => match.home === team || match.away === team)
-            .sort((first, second) => first.round - second.round);
+            .map(match => ({
+                ...match,
+                phaseOrder: 0,
+                phase: '',
+                position: match.index || 0,
+                schedule: getMatchSchedule(match),
+                complete: Boolean(getMatchPoints(match))
+            }));
+        if (state.competitionType === 'bracket') {
+            const roundCount = Math.ceil(Math.log2(state.teams.length));
+            state.bracketGames
+                .filter(game => game.home && game.away && (game.home === team || game.away === team))
+                .forEach(game => teamMatches.push({
+                    ...game,
+                    phaseOrder: 1,
+                    phase: 'Loại trực tiếp',
+                    title: game.round === roundCount ? 'Chung kết' : `Vòng ${game.round}`,
+                    position: game.position,
+                    schedule: { date: game.date || '', time: game.time || '' },
+                    complete: Boolean(game.winner)
+                }));
+        }
+        if (state.advanceEnabled) {
+            buildAdvanceFixtures()
+                .filter(fixture => fixture.home === team || fixture.away === team)
+                .forEach(fixture => {
+                    const branch = state.advanceBranches[fixture.branchIndex];
+                    teamMatches.push({
+                        ...fixture,
+                        phaseOrder: fixture.branchIndex + 2,
+                        phase: `Nhánh ${fixture.branchIndex + 1} · ${branch.format === 'bracket' ? 'Loại trực tiếp' : 'Vòng tròn'}`,
+                        title: branch.format === 'bracket' &&
+                            fixture.round === Math.ceil(Math.log2(branch.end - branch.start + 1))
+                            ? 'Chung kết'
+                            : `Vòng ${fixture.round}`,
+                        schedule: {
+                            date: fixture.date || '',
+                            time: fixture.time || ''
+                        },
+                        complete: Number.isInteger(fixture.homeScore) &&
+                            Number.isInteger(fixture.awayScore) &&
+                            (fixture.format !== 'bracket' || Boolean(fixture.winner))
+                    });
+                });
+        }
+        teamMatches.sort((first, second) =>
+            first.phaseOrder - second.phaseOrder ||
+            first.round - second.round ||
+            first.position - second.position
+        );
         const color = safeTeamColor(state.teamColors[team]);
         const matchHistory = teamMatches.length
             ? teamMatches.map(match => {
                 const homeSide = match.home === team;
                 const opponent = homeSide ? match.away : match.home;
-                const result = getMatchPoints(match);
-                const schedule = getMatchSchedule(match);
-                const score = result
-                    ? `${match.homeForfeit ? 'Bỏ cuộc' : (match.homeScore ?? 0)} – ${match.awayForfeit ? 'Bỏ cuộc' : (match.awayScore ?? 0)}`
+                const isScored = Number.isInteger(match.homeScore) && Number.isInteger(match.awayScore);
+                const score = isScored
+                    ? `${match.homeForfeit ? 'Bỏ cuộc' : match.homeScore} – ${match.awayForfeit ? 'Bỏ cuộc' : match.awayScore}`
                     : 'Chưa thi đấu';
+                const schedule = match.schedule || { date: '', time: '' };
                 const status = match.friendly ? '<span class="team-match-badge friendly">Giao hữu</span>'
-                    : result ? '<span class="team-match-badge completed">Đã đấu</span>'
+                    : match.complete ? '<span class="team-match-badge completed">Đã đấu</span>'
                         : '<span class="team-match-badge upcoming">Sắp diễn ra</span>';
                 return `<article class="team-match-card">
                     <div class="team-match-round">
-                        <strong>Vòng ${match.round}</strong>
+                        <strong>${escapeHtml(match.phase ? `${match.phase} · ${match.title}` : `Vòng ${match.round}`)}</strong>
                         <span>${escapeHtml(formatMatchDateTime(schedule.date, schedule.time) || 'Chưa có ngày giờ')}</span>
                     </div>
                     <div class="team-match-versus">
@@ -2100,6 +2172,7 @@ document.addEventListener('DOMContentLoaded', () => {
             standings: 'Bảng xếp hạng',
             'round-schedule': `Lịch vòng ${round}`,
             auth: authMode === 'signup' ? 'Tạo tài khoản MLeague' : 'Đăng nhập MLeague',
+            'account-profile': 'Thông tin tài khoản',
             'my-schedules': 'Các giải đấu đã lưu',
             'save-league': currentLeagueId ? 'Cập nhật giải đấu đã lưu' : 'Lưu giải đấu',
             'share-link': 'Chia sẻ giải đấu'
@@ -2206,6 +2279,30 @@ document.addEventListener('DOMContentLoaded', () => {
                     <input name="account-password" type="password" autocomplete="${authMode === 'signup' ? 'new-password' : 'current-password'}" minlength="6" required>
                 </label>
                 <button class="button button-text auth-mode-toggle" type="button" data-action="toggle-auth-mode">${authMode === 'signup' ? 'Đã có tài khoản? Đăng nhập' : 'Chưa có tài khoản? Tạo tài khoản'}</button>
+            </div>`;
+        }
+        if (kind === 'account-profile' && currentUser) {
+            const createdAt = currentUser.metadata && currentUser.metadata.creationTime
+                ? new Intl.DateTimeFormat('vi-VN', { dateStyle: 'medium' }).format(new Date(currentUser.metadata.creationTime))
+                : 'Không có thông tin';
+            return `<div class="account-profile">
+                <div class="account-profile-summary">
+                    <span class="account-avatar"><i class="fa-solid fa-user"></i></span>
+                    <div><strong>${escapeHtml(currentUser.displayName || currentUser.email || 'Tài khoản MLeague')}</strong>
+                        <small>Tài khoản MLeague</small></div>
+                </div>
+                <label class="form-field">Tên tài khoản
+                    <input name="account-display-name" type="text" maxlength="80"
+                        value="${escapeHtml(currentUser.displayName || '')}" placeholder="Nhập tên hiển thị">
+                    <small>Tên này sẽ hiển thị trên thanh điều hướng.</small>
+                </label>
+                <label class="form-field">Email
+                    <input type="email" value="${escapeHtml(currentUser.email || '')}" disabled>
+                </label>
+                <div class="account-profile-detail"><span>Ngày tạo</span><strong>${escapeHtml(createdAt)}</strong></div>
+                <button class="button button-outline account-profile-signout" type="button" data-action="account-sign-out">
+                    <i class="fa-solid fa-arrow-right-from-bracket"></i> Đăng xuất tài khoản
+                </button>
             </div>`;
         }
         if (kind === 'save-league') {
@@ -2391,6 +2488,30 @@ document.addEventListener('DOMContentLoaded', () => {
                     showToast('Đăng nhập thành công.');
                 }
                 closeModal();
+                return;
+            } catch (error) {
+                showToast(firebaseErrorMessage(error));
+                return;
+            }
+        } else if (activeModal === 'account-profile') {
+            const displayName = String(formData.get('account-display-name') || '').trim();
+            if (!currentUser) {
+                closeModal();
+                authMode = 'signin';
+                openModal('auth');
+                return;
+            }
+            try {
+                const services = await getFirebaseServices();
+                const user = services.auth.currentUser;
+                if (!user) throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+                await services.updateProfile(user, {
+                    displayName: displayName || null
+                });
+                currentUser = user;
+                updateAccountNavigation();
+                closeModal();
+                showToast('Đã cập nhật thông tin tài khoản.');
                 return;
             } catch (error) {
                 showToast(firebaseErrorMessage(error));
@@ -2889,7 +3010,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const scoreLabel = state.sport === 'volleyball' || state.sport === 'badminton' || state.sport === 'tennis'
             ? 'Set'
             : state.sport === 'basketball' ? 'Điểm ghi' : 'Bàn thắng';
-        const table = `<div class="standings-table-scroll"><table class="standings-table">
+        const table = state.competitionType === 'bracket' ? '' : `<div class="standings-table-scroll"><table class="standings-table">
             <thead><tr><th>#</th><th>Đội</th>${advanceBranches.length ? '<th>Nhánh tiếp theo</th>' : ''}<th>Đ</th><th>T</th><th>H</th><th>B</th><th>${scoreLabel}</th><th>HS</th><th>Điểm</th></tr></thead>
             <tbody>${sortedStandings.map((team, index) => `<tr>
                 <td>${index + 1}</td>
@@ -2975,7 +3096,11 @@ document.addEventListener('DOMContentLoaded', () => {
             )
             : '';
 
-        return `<div class="standings-summary">
+        return `<div class="standings-print-heading"><strong>${escapeHtml(state.league)}</strong><span>Bảng xếp hạng</span></div>
+            <div class="standings-actions">
+                <button class="button button-outline" type="button" data-action="print-standings"><i class="fa-solid fa-print"></i> In bảng xếp hạng</button>
+            </div>
+            <div class="standings-summary">
                 <span>${escapeHtml(state.sport ? getSportName(state.sport) : 'Chưa chọn môn thể thao')}</span>
                 <span>${totalCompletedMatches} trận có kết quả</span>
             </div>
@@ -2991,7 +3116,9 @@ document.addEventListener('DOMContentLoaded', () => {
             ${roundRobinBranches.length
                 ? '<p class="standings-note branch-standings-note">Bảng vòng tròn của từng nhánh chỉ tính kết quả các trận đã mô phỏng trong chính nhánh đó. “Hạng chung” là thứ hạng của đội ở vòng tròn ban đầu.</p>'
                 : ''}
-            <p class="standings-note">Trận giao hữu và trận chưa nhập kết quả không được tính. Ưu tiên xếp hạng: ${sortRules.map((rule, index) => `${index + 1}. ${escapeHtml(getSportPreset(state.sport).labels[rule])}`).join(' · ')}.</p>`;
+            ${state.competitionType !== 'bracket'
+                ? `<p class="standings-note">Trận giao hữu và trận chưa nhập kết quả không được tính. Ưu tiên xếp hạng: ${sortRules.map((rule, index) => `${index + 1}. ${escapeHtml(getSportPreset(state.sport).labels[rule])}`).join(' · ')}.</p>`
+                : ''}`;
     }
 
     function rankStandings(teams, completedMatches, rules, ruleIndex = 0) {
@@ -3116,6 +3243,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (action === 'toggle-auth-mode') {
             authMode = authMode === 'signin' ? 'signup' : 'signin';
             openModal('auth');
+        } else if (action === 'account-sign-out') {
+            closeModal();
+            await signOutUser();
         } else if (action === 'open-saved-league') {
             try {
                 await openSavedLeague(button.dataset.leagueId);
