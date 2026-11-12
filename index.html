@@ -48,6 +48,10 @@
                                 </label>
                             </div>
                         </fieldset>
+                        <label class="home-away-toggle">
+                            <input id="home-away-enabled" name="home-away-enabled" type="checkbox">
+                            <span><strong>Thi đấu lượt đi, lượt về</strong><small id="home-away-description">Vòng tròn: mỗi cặp gặp nhau hai trận, đổi sân. Loại trực tiếp: tính tổng tỉ số sau hai lượt.</small></span>
+                        </label>
                         <div id="round-robin-advanced" class="round-robin-advanced hidden">
                             <label class="advanced-combination-toggle">
                                 <input id="advance-enabled" name="advance-enabled" type="checkbox">
@@ -97,11 +101,11 @@
                             <span class="field-icon"><i class="fa-solid fa-futbol"></i></span>
                             <div class="field-copy">
                                 <label for="games-per-team">Số trận mỗi đội</label>
-                                <small>Tổng số trận mỗi đội chơi trong mùa giải.</small>
+                                <small id="games-per-team-help">Tổng số trận mỗi đội chơi trong mùa giải.</small>
                             </div>
                             <div class="stepper">
                                 <button type="button" class="step-button" data-target="games-per-team" data-step="-1" aria-label="Giảm số trận"><i class="fa-solid fa-minus"></i></button>
-                                <input id="games-per-team" type="number" min="1" max="49" value="4" required>
+                                <input id="games-per-team" type="number" min="1" max="50" value="4" required>
                                 <button type="button" class="step-button" data-target="games-per-team" data-step="1" aria-label="Tăng số trận"><i class="fa-solid fa-plus"></i></button>
                             </div>
                         </div>

@@ -31,6 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
         teamColorMode: 'hidden',
         roundSchedules: {},
         competitionType: 'round-robin',
+        homeAwayEnabled: false,
         bracketFormat: 'single',
         bracketConsolation: 'none',
         bracketThirdPlaceEnabled: false,
@@ -373,15 +374,16 @@ document.addEventListener('DOMContentLoaded', () => {
         state.teamColorMode = data.teamColorMode || 'hidden';
         state.roundSchedules = data.roundSchedules || {};
         state.competitionType = data.competitionType === 'bracket' ? 'bracket' : 'round-robin';
+        state.homeAwayEnabled = data.homeAwayEnabled === true;
         state.bracketFormat = data.bracketFormat === 'double' ? 'double' : 'single';
         state.bracketThirdPlaceEnabled = data.bracketThirdPlaceEnabled === true ||
             data.bracketConsolation === 'third-place';
         state.bracketConsolation = data.bracketConsolation === 'full' ? 'full' : 'none';
-        state.bracketGames = state.competitionType === 'bracket' && validBracketGames(data.bracketGames, data.teams)
+        state.bracketGames = state.competitionType === 'bracket' && validBracketGames(data.bracketGames, data.teams, state.homeAwayEnabled)
             ? data.bracketGames.map(game => ({ ...game }))
             : state.competitionType === 'bracket' ? buildBracketGames(data.teams) : [];
         state.thirdPlaceGame = state.competitionType === 'bracket'
-            ? validThirdPlaceGame(data.thirdPlaceGame, data.teams)
+            ? validThirdPlaceGame(data.thirdPlaceGame, data.teams, state.homeAwayEnabled)
                 ? { ...data.thirdPlaceGame }
                 : createEmptyBracketGame()
             : null;
@@ -439,11 +441,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (input === teamCountInput) updateBracketSetup();
         });
     });
-    document.querySelectorAll('[name="competition-type"], [name="bracket-format"], [name="bracket-consolation"], [name="bracket-third-place"], [name="advance-enabled"]').forEach(input => {
+    document.querySelectorAll('[name="competition-type"], [name="home-away-enabled"], [name="bracket-format"], [name="bracket-consolation"], [name="bracket-third-place"], [name="advance-enabled"]').forEach(input => {
         input.addEventListener('change', updateBracketSetup);
     });
     teamCountInput.addEventListener('input', updateBracketSetup);
     teamCountInput.addEventListener('change', updateBracketSetup);
+    gamesInput.addEventListener('input', updateBracketSetup);
+    weeksInput.addEventListener('input', updateBracketSetup);
     document.getElementById('advance-branches').addEventListener('change', () => {
         state.advanceBranches = readAdvanceBranches();
         updateBracketSetup(false);
@@ -538,6 +542,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateBracketSetup(refreshBranches = true) {
         const formData = new FormData(setupForm);
         const isBracket = formData.get('competition-type') === 'bracket';
+        const homeAwayEnabled = formData.has('home-away-enabled');
         const advanceEnabled = !isBracket && formData.has('advance-enabled');
         const bracketOptions = document.getElementById('bracket-options');
         bracketOptions.classList.toggle('hidden', !isBracket);
@@ -548,6 +553,25 @@ document.addEventListener('DOMContentLoaded', () => {
         gamesInput.disabled = isBracket;
         weeksInput.disabled = isBracket;
         const teamCount = Number(teamCountInput.value);
+        const maxGames = maxGamesPerTeam(teamCount, Number(weeksInput.value), homeAwayEnabled);
+        const minimumGames = homeAwayEnabled ? (teamCount % 2 === 1 ? 4 : 2) : 1;
+        const gamesStep = homeAwayEnabled ? (teamCount % 2 === 1 ? 4 : 2) : 1;
+        gamesInput.min = String(minimumGames);
+        gamesInput.max = String(Math.max(minimumGames, maxGames));
+        gamesInput.step = String(gamesStep);
+        weeksInput.min = String(minimumRoundsForGames(
+            Number.isInteger(teamCount) ? teamCount : 2,
+            Number(gamesInput.value) || 1,
+            homeAwayEnabled
+        ));
+        document.getElementById('home-away-description').textContent = homeAwayEnabled
+            ? 'Mỗi cặp gặp nhau hai trận, đổi sân; loại trực tiếp tính tổng tỉ số sau hai lượt.'
+            : 'Vòng tròn: một trận mỗi cặp. Loại trực tiếp: một trận mỗi vòng.';
+        document.getElementById('games-per-team-help').textContent = homeAwayEnabled
+            ? Number.isInteger(teamCount) && teamCount % 2 === 1
+                ? 'Số trận mỗi đội; với số đội lẻ, chọn bội số của 4 để mỗi cặp gặp đúng hai lần.'
+                : 'Số trận mỗi đội; chọn số chẵn để mỗi đối thủ gặp hai lần.'
+            : 'Tổng số trận mỗi đội chơi trong mùa giải.';
         if (refreshBranches && Number.isInteger(teamCount) && teamCount >= 2 && teamCount <= 50) {
             state.advanceBranches = state.advanceBranches.reduce((branches, branch) => {
                 const start = Math.max(branch.start, branches.length ? branches[branches.length - 1].end + 1 : 1);
@@ -725,7 +749,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             (!awaySource.home || !awaySource.away));
                         const winnerClass = game.winner ? ' bracket-winner' : '';
                         const score = Number.isInteger(game.homeScore) && Number.isInteger(game.awayScore);
-                        const schedule = formatMatchDateTime(game.date, game.time);
+                        const schedule = state.homeAwayEnabled ? '' : formatMatchDateTime(game.date, game.time);
                         const matchCode = bracketMatchCode(game);
                         const label = `${matchCode}, ${title}: ${homeName} gặp ${awayName}`;
                         return `<button class="bracket-match-card${ready ? ' bracket-editable' : ''}${winnerClass}"
@@ -745,7 +769,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             ${homeHadBye || awayHadBye
                                 ? `<small class="bracket-game-status">${[homeHadBye ? `${escapeHtml(game.home)} miễn vòng ${game.round - 1}` : '', awayHadBye ? `${escapeHtml(game.away)} miễn vòng ${game.round - 1}` : ''].filter(Boolean).join(' · ')}</small>`
                                 : ''}
-                            ${schedule ? `<small class="bracket-game-schedule"><i class="fa-regular fa-clock"></i> ${escapeHtml(schedule)}</small>` : ''}
+                            ${state.homeAwayEnabled ? bracketLegDetailsMarkup(game) :
+                                (schedule ? `<small class="bracket-game-schedule"><i class="fa-regular fa-clock"></i> ${escapeHtml(schedule)}</small>` : '')}
                             ${game.comment ? `<small class="bracket-game-comment">${escapeHtml(game.comment)}</small>` : ''}
                             ${ready && !game.winner && score && game.homeScore === game.awayScore
                                 ? '<small class="bracket-game-status">Chọn đội thắng để đi tiếp</small>' : ''}
@@ -790,14 +815,16 @@ document.addEventListener('DOMContentLoaded', () => {
             ${consolationPreview}
             ${state.bracketFormat !== 'double' && state.bracketGames.some(game => game.winner && game.round === rounds)
                 ? `<div class="bracket-champion"><i class="fa-solid fa-trophy"></i> Vô địch: <strong>${escapeHtml(state.bracketGames.find(game => game.round === rounds).winner)}</strong></div>` : ''}
-            <p class="bracket-preview-note">Các đội được miễn vòng đầu xuất hiện từ vòng kế tiếp. Khi nhập tỉ số hòa, hãy chọn đội thắng để cập nhật nhánh.</p>`;
+            <p class="bracket-preview-note">Các đội được miễn vòng đầu xuất hiện từ vòng kế tiếp. ${state.homeAwayEnabled
+                ? 'Tỉ số trên sơ đồ là tổng hai lượt.'
+                : ''} Khi nhập tỉ số hòa, hãy chọn đội thắng để cập nhật nhánh.</p>`;
     }
 
     function thirdPlaceMatchMarkup() {
         const game = state.thirdPlaceGame || createEmptyBracketGame();
         const ready = Boolean(game.home && game.away);
         const scored = Number.isInteger(game.homeScore) && Number.isInteger(game.awayScore);
-        const schedule = formatMatchDateTime(game.date, game.time);
+        const schedule = state.homeAwayEnabled ? '' : formatMatchDateTime(game.date, game.time);
         return `<button class="bracket-match-card${ready ? ' bracket-editable' : ' bracket-tbd'}${game.winner ? ' bracket-winner' : ''}"
                 type="button" data-third-place-match aria-label="Trận tranh hạng ba: ${escapeHtml(game.home || 'Chờ đội thua bán kết 1')} gặp ${escapeHtml(game.away || 'Chờ đội thua bán kết 2')}"
                 ${!ready || readOnlyView ? ' disabled' : ''}>
@@ -808,9 +835,20 @@ document.addEventListener('DOMContentLoaded', () => {
             <span class="bracket-team${game.winner === game.away ? ' bracket-team-winner' : ''}">
                 ${escapeHtml(game.away || 'Đội thua bán kết 2')}<b>${scored ? game.awayScore : ''}</b>
             </span>
-            ${schedule ? `<small class="bracket-game-schedule"><i class="fa-regular fa-clock"></i> ${escapeHtml(schedule)}</small>` : ''}
+            ${state.homeAwayEnabled ? bracketLegDetailsMarkup(game) :
+                (schedule ? `<small class="bracket-game-schedule"><i class="fa-regular fa-clock"></i> ${escapeHtml(schedule)}</small>` : '')}
             ${game.comment ? `<small class="bracket-game-comment">${escapeHtml(game.comment)}</small>` : ''}
         </button>`;
+    }
+
+    function bracketLegDetailsMarkup(game) {
+        return (game.legs || []).map((leg, index) => {
+            const score = Number.isInteger(leg.homeScore) && Number.isInteger(leg.awayScore)
+                ? ` · ${leg.homeScore}–${leg.awayScore}`
+                : '';
+            const schedule = formatMatchDateTime(leg.date, leg.time);
+            return `<small class="bracket-game-schedule">${index === 0 ? 'Lượt đi' : 'Lượt về · đổi sân'}${score}${schedule ? ` · ${escapeHtml(schedule)}` : ''}</small>`;
+        }).join('');
     }
 
     function bracketMatchCode(game) {
@@ -865,7 +903,9 @@ document.addEventListener('DOMContentLoaded', () => {
     setupForm.addEventListener('submit', event => {
         event.preventDefault();
         const teamCount = Number(teamCountInput.value);
-        const competitionType = String(new FormData(setupForm).get('competition-type'));
+        const formData = new FormData(setupForm);
+        const competitionType = String(formData.get('competition-type'));
+        const homeAwayEnabled = formData.has('home-away-enabled');
         const games = Number(gamesInput.value);
         const rounds = Number(weeksInput.value);
         if (!Number.isInteger(teamCount) || teamCount < 2 || teamCount > 50) {
@@ -873,16 +913,30 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         if (competitionType === 'round-robin') {
-            if (!Number.isInteger(rounds) || rounds < 1 || rounds > 50) {
-                showToast('Số tuần / vòng phải từ 1 đến 50.');
+            const minimumRounds = homeAwayEnabled ? 2 : 1;
+            if (!Number.isInteger(rounds) || rounds < minimumRounds || rounds > 50) {
+                showToast(`Số tuần / vòng phải từ ${minimumRounds} đến 50.`);
                 return;
             }
-            if (!Number.isInteger(games) || games < 1 || games > Math.min(rounds, teamCount - 1)) {
-                showToast(`Số trận mỗi đội cần từ 1 đến ${Math.min(rounds, teamCount - 1)}.`);
+            const minimumGames = homeAwayEnabled ? (teamCount % 2 === 1 ? 4 : 2) : 1;
+            const gamesStep = homeAwayEnabled ? (teamCount % 2 === 1 ? 4 : 2) : 1;
+            const requiredRounds = minimumRoundsForGames(teamCount, games, homeAwayEnabled);
+            if (homeAwayEnabled && Number.isInteger(games) && games >= minimumGames &&
+                games % gamesStep === 0 &&
+                teamCount * (games / 2) % 2 === 0 &&
+                rounds < requiredRounds) {
+                showToast(`Với ${teamCount} đội và ${games} trận mỗi đội, cần ít nhất ${requiredRounds} vòng để xếp đủ hai lượt.`);
+                return;
+            }
+            const maxGames = maxGamesPerTeam(teamCount, rounds, homeAwayEnabled);
+            if (!Number.isInteger(games) || games < minimumGames || games > maxGames ||
+                homeAwayEnabled && games % gamesStep !== 0) {
+                showToast(`Số trận mỗi đội cần là ${homeAwayEnabled
+                    ? (teamCount % 2 === 1 ? 'bội số của 4' : 'số chẵn từ 2')
+                    : 'số nguyên từ 1'} đến ${maxGames}.`);
                 return;
             }
         }
-        const formData = new FormData(setupForm);
         const advanceEnabled = competitionType === 'round-robin' && formData.has('advance-enabled');
         const advanceBranches = advanceEnabled ? readAdvanceBranches() : [];
         const occupiedRanks = new Set();
@@ -911,6 +965,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ]));
         if (competitionType === 'round-robin') state.gamesPerTeam = games;
         state.competitionType = competitionType;
+        state.homeAwayEnabled = homeAwayEnabled;
         state.bracketFormat = String(new FormData(setupForm).get('bracket-format') || 'single');
         state.bracketConsolation = String(formData.get('bracket-consolation') || 'none');
         state.bracketThirdPlaceEnabled = formData.has('bracket-third-place');
@@ -1352,7 +1407,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 .forEach(game => {
                     if (!game.home || !game.away ||
                         Number.isInteger(game.homeScore) && Number.isInteger(game.awayScore)) return;
-                    [game.homeScore, game.awayScore] = randomResultScores();
+                    if (state.homeAwayEnabled) {
+                        if (!validBracketLegs(game.legs)) game.legs = [createEmptyBracketLeg(), createEmptyBracketLeg()];
+                        game.legs.forEach(leg => {
+                            if (!Number.isInteger(leg.homeScore) || !Number.isInteger(leg.awayScore)) {
+                                [leg.homeScore, leg.awayScore] = randomResultScores();
+                            }
+                        });
+                        syncBracketAggregate(game);
+                    } else {
+                        [game.homeScore, game.awayScore] = randomResultScores();
+                    }
                     game.winnerChoice = game.homeScore === game.awayScore
                         ? (Math.random() < 0.5 ? game.home : game.away)
                         : null;
@@ -1394,10 +1459,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const games = state.bracketGames.filter(game => game.round >= round && game.randomResult);
         if (!games.length) return;
         games.forEach(game => {
-            game.homeScore = null;
-            game.awayScore = null;
-            game.winnerChoice = null;
-            delete game.randomResult;
+            clearBracketGameResult(game);
         });
         resolveBracketProgression();
         renderSchedule();
@@ -1507,6 +1569,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('advance-enabled').checked = state.advanceEnabled;
         teamCountInput.value = state.teams.length;
         renderAdvanceBranches();
+        setupForm.querySelector('[name="home-away-enabled"]').checked = state.homeAwayEnabled;
         gamesInput.value = state.gamesPerTeam;
         weeksInput.value = state.rounds;
         updateBracketSetup();
@@ -1567,7 +1630,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const hasMatchDetails = match => Boolean(
             match.date || match.time || match.comment ||
             Number.isFinite(match.homeScore) || Number.isFinite(match.awayScore) ||
-            match.homeForfeit || match.awayForfeit || match.friendly
+            match.homeForfeit || match.awayForfeit || match.friendly ||
+            Array.isArray(match.legs) && match.legs.some(leg =>
+                leg.date || leg.time || Number.isFinite(leg.homeScore) || Number.isFinite(leg.awayScore))
         );
         return state.competitionType === 'bracket'
             ? state.bracketGames.some(hasMatchDetails) || hasMatchDetails(state.thirdPlaceGame || {})
@@ -1576,7 +1641,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 Object.keys(state.advanceFixtureResults).length > 0;
     }
 
-    function validBracketGames(games, teams) {
+    function validBracketGames(games, teams, homeAwayEnabled = false) {
+        const scoreLimit = homeAwayEnabled ? 1998 : 999;
         const maxRounds = Math.ceil(Math.log2(teams.length));
         const size = 2 ** maxRounds;
         const maxGames = size - 1;
@@ -1595,20 +1661,58 @@ document.addEventListener('DOMContentLoaded', () => {
                 expectedPositions.delete(`${game.round}:${game.position}`) &&
                 (game.home === null || teams.includes(game.home)) &&
                 (game.away === null || teams.includes(game.away)) &&
-                (game.homeScore === null || Number.isInteger(game.homeScore) && game.homeScore >= 0 && game.homeScore <= 999) &&
-                (game.awayScore === null || Number.isInteger(game.awayScore) && game.awayScore >= 0 && game.awayScore <= 999) &&
+                (game.homeScore === null || Number.isInteger(game.homeScore) && game.homeScore >= 0 && game.homeScore <= scoreLimit) &&
+                (game.awayScore === null || Number.isInteger(game.awayScore) && game.awayScore >= 0 && game.awayScore <= scoreLimit) &&
+                (!homeAwayEnabled || validBracketLegs(game.legs)) &&
                 (game.winnerChoice === null || teams.includes(game.winnerChoice))) && expectedPositions.size === 0;
     }
 
-    function validThirdPlaceGame(game, teams) {
+    function validThirdPlaceGame(game, teams, homeAwayEnabled = false) {
+        const scoreLimit = homeAwayEnabled ? 1998 : 999;
         return Boolean(game && typeof game === 'object' && !Array.isArray(game) &&
             (game.home === null || teams.includes(game.home)) &&
             (game.away === null || teams.includes(game.away)) &&
-            (game.homeScore === null || Number.isInteger(game.homeScore) && game.homeScore >= 0 && game.homeScore <= 999) &&
-            (game.awayScore === null || Number.isInteger(game.awayScore) && game.awayScore >= 0 && game.awayScore <= 999) &&
+            (game.homeScore === null || Number.isInteger(game.homeScore) && game.homeScore >= 0 && game.homeScore <= scoreLimit) &&
+            (game.awayScore === null || Number.isInteger(game.awayScore) && game.awayScore >= 0 && game.awayScore <= scoreLimit) &&
             (game.winnerChoice === null || game.winnerChoice === game.home || game.winnerChoice === game.away) &&
+            (!homeAwayEnabled || validBracketLegs(game.legs)) &&
             typeof game.date === 'string' && typeof game.time === 'string' &&
             validDateTime(game.date, game.time) && typeof game.comment === 'string');
+    }
+
+    function validBracketLegs(legs) {
+        return Array.isArray(legs) && legs.length === 2 && legs.every(leg =>
+            leg && typeof leg === 'object' &&
+            (leg.homeScore === null || Number.isInteger(leg.homeScore) && leg.homeScore >= 0 && leg.homeScore <= 999) &&
+            (leg.awayScore === null || Number.isInteger(leg.awayScore) && leg.awayScore >= 0 && leg.awayScore <= 999) &&
+            (leg.homeScore === null) === (leg.awayScore === null) &&
+            typeof leg.date === 'string' && typeof leg.time === 'string' &&
+            validDateTime(leg.date, leg.time));
+    }
+
+    function createEmptyBracketLeg() {
+        return { homeScore: null, awayScore: null, date: '', time: '' };
+    }
+
+    function clearBracketGameResult(game) {
+        game.homeScore = null;
+        game.awayScore = null;
+        game.winnerChoice = null;
+        if (Array.isArray(game.legs)) {
+            game.legs.forEach(leg => {
+                leg.homeScore = null;
+                leg.awayScore = null;
+            });
+        }
+        delete game.randomResult;
+    }
+
+    function syncBracketAggregate(game) {
+        if (!state.homeAwayEnabled) return;
+        if (!validBracketLegs(game.legs)) game.legs = [createEmptyBracketLeg(), createEmptyBracketLeg()];
+        const complete = game.legs.every(leg => Number.isInteger(leg.homeScore) && Number.isInteger(leg.awayScore));
+        game.homeScore = complete ? game.legs.reduce((total, leg) => total + leg.homeScore, 0) : null;
+        game.awayScore = complete ? game.legs.reduce((total, leg) => total + leg.awayScore, 0) : null;
     }
 
     function createEmptyBracketGame() {
@@ -1621,7 +1725,8 @@ document.addEventListener('DOMContentLoaded', () => {
             winner: null,
             date: '',
             time: '',
-            comment: ''
+            comment: '',
+            legs: [createEmptyBracketLeg(), createEmptyBracketLeg()]
         };
     }
 
@@ -1644,7 +1749,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     winner: null,
                     date: '',
                     time: '',
-                    comment: ''
+                    comment: '',
+                    legs: [createEmptyBracketLeg(), createEmptyBracketLeg()]
                 });
             }
         }
@@ -1662,15 +1768,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     const home = gamesByRound[roundIndex - 1][game.position * 2]?.winner || null;
                     const away = gamesByRound[roundIndex - 1][game.position * 2 + 1]?.winner || null;
                     if (game.home !== home || game.away !== away) {
-                        game.homeScore = null;
-                        game.awayScore = null;
-                        game.winnerChoice = null;
+                        clearBracketGameResult(game);
                     }
                     game.home = home;
                     game.away = away;
                 });
             }
             games.forEach(game => {
+                if (game.home && game.away) syncBracketAggregate(game);
                 game.winner = null;
                 if (roundIndex === 0 && game.home && !game.away) {
                     game.winner = game.home;
@@ -1699,12 +1804,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const home = semifinalLosers.length === 2 ? semifinalLosers[0] : null;
         const away = semifinalLosers.length === 2 ? semifinalLosers[1] : null;
         if (game.home !== home || game.away !== away) {
-            game.homeScore = null;
-            game.awayScore = null;
-            game.winnerChoice = null;
+            clearBracketGameResult(game);
         }
         game.home = home;
         game.away = away;
+        if (home && away) syncBracketAggregate(game);
         game.winner = null;
         if (home && away && Number.isInteger(game.homeScore) && Number.isInteger(game.awayScore)) {
             if (game.homeScore > game.awayScore) game.winner = home;
@@ -1714,9 +1818,41 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function buildSchedule(teams, gamesPerTeam, rounds) {
+        if (state.homeAwayEnabled) return buildDoubleRoundSchedule(teams, gamesPerTeam, rounds);
+        return buildSingleLegSchedule(teams, gamesPerTeam, rounds);
+    }
+
+    function buildDoubleRoundSchedule(teams, gamesPerTeam, rounds) {
+        const opponentsPerTeam = gamesPerTeam / 2;
+        const firstLegMatchCount = teams.length * opponentsPerTeam / 2;
+        const legRounds = Math.floor(rounds / 2);
+        for (let attempt = 0; attempt < 200; attempt += 1) {
+            const firstLeg = buildSingleLegSchedule(teams, opponentsPerTeam, legRounds);
+            const appearances = new Map(teams.map(team => [team, 0]));
+            const pairs = new Set();
+            firstLeg.forEach(match => {
+                appearances.set(match.home, appearances.get(match.home) + 1);
+                appearances.set(match.away, appearances.get(match.away) + 1);
+                pairs.add(pairKey(match.home, match.away));
+            });
+            if (firstLeg.length !== firstLegMatchCount ||
+                [...appearances.values()].some(count => count !== opponentsPerTeam) ||
+                pairs.size !== firstLeg.length) continue;
+            const returnLeg = firstLeg.map(match => ({
+                round: match.round + legRounds,
+                home: match.away,
+                away: match.home
+            }));
+            return firstLeg.concat(returnLeg);
+        }
+        throw new Error('Không thể tạo lịch lượt đi lượt về với số trận và số vòng đã chọn.');
+    }
+
+    function buildSingleLegSchedule(teams, gamesPerTeam, rounds) {
         const matches = [];
         const appearances = new Map(teams.map(team => [team, 0]));
-        const playedAgainst = new Set();
+        const meetingsByPair = new Map();
+        const firstLegsByPair = new Map();
         const byeCounts = new Map(teams.map(team => [team, 0]));
         const totalMatches = Math.floor(teams.length * gamesPerTeam / 2);
         let remainingMatches = totalMatches;
@@ -1730,19 +1866,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 .slice(0, byeCount);
             byeTeams.forEach(team => byeCounts.set(team, byeCounts.get(team) + 1));
             const activeTeams = teams.filter(team => !byeTeams.includes(team));
-            const roundMatches = findRoundMatches(activeTeams, gamesPerTeam, appearances, playedAgainst, target);
+            const roundMatches = findRoundMatches(
+                activeTeams, gamesPerTeam, appearances, meetingsByPair, firstLegsByPair, target, false
+            );
             roundMatches.forEach(([home, away]) => {
                 matches.push({ round, home, away });
                 appearances.set(home, appearances.get(home) + 1);
                 appearances.set(away, appearances.get(away) + 1);
-                playedAgainst.add(pairKey(home, away));
+                const key = pairKey(home, away);
+                meetingsByPair.set(key, (meetingsByPair.get(key) || 0) + 1);
+                if (!firstLegsByPair.has(key)) firstLegsByPair.set(key, { home, away });
             });
             remainingMatches -= roundMatches.length;
         }
         return matches;
     }
 
-    function findRoundMatches(teams, gamesPerTeam, appearances, playedAgainst, target) {
+    function findRoundMatches(teams, gamesPerTeam, appearances, meetingsByPair, firstLegsByPair, target, homeAwayEnabled) {
         let bestMatches = [];
         for (let attempt = 0; attempt < 120; attempt += 1) {
             const candidates = shuffle([...teams]);
@@ -1758,7 +1898,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const home = available[0];
                 const opponents = available
                     .slice(1)
-                    .filter(team => !playedAgainst.has(pairKey(home, team)))
+                    .filter(team => (meetingsByPair.get(pairKey(home, team)) || 0) < (homeAwayEnabled ? 2 : 1))
                     .sort((a, b) => appearances.get(a) - appearances.get(b));
                 if (!opponents.length) {
                     used.add(home);
@@ -1767,7 +1907,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 const opponentPool = opponents.filter(team => appearances.get(team) === appearances.get(opponents[0]));
                 const away = opponentPool[Math.floor(Math.random() * opponentPool.length)];
-                matches.push([home, away]);
+                const firstLeg = firstLegsByPair.get(pairKey(home, away));
+                matches.push(firstLeg ? [firstLeg.away, firstLeg.home] : [home, away]);
                 used.add(home);
                 used.add(away);
             }
@@ -1789,6 +1930,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function pairKey(first, second) {
         return [first, second].sort((a, b) => a.localeCompare(b)).join('\u0000');
+    }
+
+    function maxGamesPerTeam(teamCount, rounds, homeAwayEnabled) {
+        if (!homeAwayEnabled) return Math.min(rounds, teamCount - 1);
+        const perRoundCapacity = Math.floor(teamCount / 2);
+        for (let games = Math.min(rounds, (teamCount - 1) * 2); games >= 2; games -= 1) {
+            if (games % 2 !== 0) continue;
+            const firstLegGamesPerTeam = games / 2;
+            if (teamCount * firstLegGamesPerTeam % 2 !== 0) continue;
+            const firstLegRounds = Math.ceil(
+                teamCount * firstLegGamesPerTeam / 2 / perRoundCapacity
+            );
+            if (firstLegRounds * 2 <= rounds) return games;
+        }
+        return 0;
+    }
+
+    function minimumRoundsForGames(teamCount, gamesPerTeam, homeAwayEnabled) {
+        if (!homeAwayEnabled) return gamesPerTeam;
+        const opponentsPerTeam = gamesPerTeam / 2;
+        if (!Number.isInteger(opponentsPerTeam) || opponentsPerTeam < 1 ||
+            teamCount * opponentsPerTeam % 2 !== 0) return 50;
+        const matchesPerRound = Math.floor(teamCount / 2);
+        const legRounds = Math.ceil(teamCount * opponentsPerTeam / 2 / matchesPerRound);
+        return legRounds * 2;
     }
 
     function populateFilter() {
@@ -1909,6 +2075,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ? `<div class="tournament-match-summary">
                 <strong>Tổng lịch: ${state.matches.length + advanceFixtures.length} trận</strong>
                 <span>Vòng tròn: ${state.matches.length} trận · Vòng tiếp theo: ${advanceFixtures.length} trận</span>
+                ${state.homeAwayEnabled ? '<span>Vòng tròn thi đấu lượt đi, lượt về; các cặp đổi sân ở lượt về.</span>' : ''}
                 <span>Đội ở vòng tiếp theo đang hiển thị theo thứ hạng dự kiến.</span>
             </div>`
             : ''}${roundRobinSections}${state.advanceEnabled ? advanceFixturesMarkup(advanceFixtures) : ''}`;
@@ -2394,32 +2561,52 @@ document.addEventListener('DOMContentLoaded', () => {
             const winnerOptions = [bracketMatch.home, bracketMatch.away].filter(Boolean).map(team =>
                 `<option value="${escapeHtml(team)}"${bracketMatch.winnerChoice === team ? ' selected' : ''}>${escapeHtml(team)}</option>`
             ).join('');
-            return `<div class="bracket-match-editor">
-                <p class="bracket-match-editor-teams"><strong>${escapeHtml(bracketMatch.home)}</strong><span>vs</span><strong>${escapeHtml(bracketMatch.away)}</strong></p>
-                <div class="match-edit-grid">
-                    <label class="form-field">${getScoreLabel()} — ${escapeHtml(bracketMatch.home)}
+            const legFields = state.homeAwayEnabled
+                ? (bracketMatch.legs || [createEmptyBracketLeg(), createEmptyBracketLeg()]).map((leg, index) => `
+                    <fieldset class="bracket-leg-fields">
+                        <legend>${index === 0 ? 'Lượt đi' : 'Lượt về · đổi sân'}</legend>
+                        <label class="form-field">${getScoreLabel()} — ${escapeHtml(bracketMatch.home)}
+                            <input name="leg-${index}-home-score" type="number" min="0" max="999" step="1" value="${Number.isInteger(leg.homeScore) ? leg.homeScore : ''}" placeholder="Chưa có kết quả">
+                        </label>
+                        <label class="form-field">${getScoreLabel()} — ${escapeHtml(bracketMatch.away)}
+                            <input name="leg-${index}-away-score" type="number" min="0" max="999" step="1" value="${Number.isInteger(leg.awayScore) ? leg.awayScore : ''}" placeholder="Chưa có kết quả">
+                        </label>
+                        <label class="form-field">Ngày thi đấu
+                            <input name="leg-${index}-date" type="date" value="${escapeHtml(leg.date || '')}">
+                        </label>
+                        <label class="form-field">Giờ bắt đầu
+                            <input name="leg-${index}-time" type="time" value="${escapeHtml(leg.time || '')}">
+                        </label>
+                    </fieldset>`).join('')
+                : `<label class="form-field">${getScoreLabel()} — ${escapeHtml(bracketMatch.home)}
                         <input name="home-score" type="number" min="0" max="999" step="1" value="${Number.isInteger(bracketMatch.homeScore) ? bracketMatch.homeScore : ''}" placeholder="Chưa có kết quả">
                     </label>
                     <label class="form-field">${getScoreLabel()} — ${escapeHtml(bracketMatch.away)}
                         <input name="away-score" type="number" min="0" max="999" step="1" value="${Number.isInteger(bracketMatch.awayScore) ? bracketMatch.awayScore : ''}" placeholder="Chưa có kết quả">
-                    </label>
-                    <label class="form-field bracket-tiebreak-field">Đội thắng nếu tỉ số hòa
-                        <select name="bracket-winner">
-                            <option value="">Chọn khi cần phân định</option>
-                            ${winnerOptions}
-                        </select>
                     </label>
                     <label class="form-field">Ngày thi đấu
                         <input name="match-date" type="date" value="${escapeHtml(bracketMatch.date || '')}">
                     </label>
                     <label class="form-field">Giờ bắt đầu
                         <input name="match-time" type="time" value="${escapeHtml(bracketMatch.time || '')}">
+                    </label>`;
+            return `<div class="bracket-match-editor">
+                <p class="bracket-match-editor-teams"><strong>${escapeHtml(bracketMatch.home)}</strong><span>vs</span><strong>${escapeHtml(bracketMatch.away)}</strong></p>
+                <div class="match-edit-grid">
+                    ${legFields}
+                    <label class="form-field bracket-tiebreak-field">Đội thắng nếu tỉ số hòa
+                        <select name="bracket-winner">
+                            <option value="">Chọn khi cần phân định</option>
+                            ${winnerOptions}
+                        </select>
                     </label>
                     <label class="form-field match-comment">Ghi chú
                         <textarea name="comment" rows="3" maxlength="500" placeholder="Ghi chú cho trận đấu">${escapeHtml(bracketMatch.comment || '')}</textarea>
                     </label>
                 </div>
-                <p class="match-scoring-note"><i class="fa-solid fa-circle-info"></i> Nhập đủ hai tỷ số. Nếu hòa, chọn đội thắng để đi tiếp.</p>
+                <p class="match-scoring-note"><i class="fa-solid fa-circle-info"></i> ${state.homeAwayEnabled
+                    ? 'Nhập đủ tỉ số cho cả hai lượt; đội thắng được xác định theo tổng tỉ số. Nếu tổng hòa, chọn đội thắng để đi tiếp.'
+                    : 'Nhập đủ hai tỷ số. Nếu hòa, chọn đội thắng để đi tiếp.'}</p>
             </div>`;
         }
         if (kind === 'teams') {
@@ -2451,8 +2638,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (kind === 'rounds') {
             return `<label class="form-field">Số tuần / vòng
-                <small>Từ 1 đến 50. Số trận mỗi đội không được vượt quá số vòng.</small>
-                <input name="rounds" type="number" min="${state.gamesPerTeam}" max="50" value="${state.rounds}" required>
+                <small>Số vòng cần đủ để xếp hết các trận; tối đa 50.</small>
+                <input name="rounds" type="number" min="${minimumRoundsForGames(state.teams.length, state.gamesPerTeam, state.homeAwayEnabled)}" max="50" value="${state.rounds}" required>
             </label>`;
         }
         if (kind === 'auth') {
@@ -2605,10 +2792,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? '<p class="bracket-settings-note">Số vòng và nhánh đấu được xác định tự động theo thể thức đấu cúp.</p>'
                 : `<div class="form-grid">
                 <label class="form-field">Số trận mỗi đội
-                    <input name="games" type="number" min="1" max="${Math.min(state.rounds, state.teams.length - 1)}" value="${state.gamesPerTeam}" required>
+                    <input name="games" type="number" min="${state.homeAwayEnabled ? (state.teams.length % 2 === 1 ? 4 : 2) : 1}" max="${maxGamesPerTeam(state.teams.length, state.rounds, state.homeAwayEnabled)}" step="${state.homeAwayEnabled ? (state.teams.length % 2 === 1 ? 4 : 2) : 1}" value="${state.gamesPerTeam}" required>
                 </label>
                 <label class="form-field">Số tuần / vòng
-                    <input name="rounds" type="number" min="${state.gamesPerTeam}" max="50" value="${state.rounds}" required>
+                    <input name="rounds" type="number" min="${minimumRoundsForGames(state.teams.length, state.gamesPerTeam, state.homeAwayEnabled)}" max="50" value="${state.rounds}" required>
                 </label>
             </div>`}
             <div class="settings-divider"></div>
@@ -2770,8 +2957,9 @@ document.addEventListener('DOMContentLoaded', () => {
             else renderSchedule();
         } else if (activeModal === 'rounds') {
             const rounds = Number(formData.get('rounds'));
-            if (!Number.isInteger(rounds) || rounds < state.gamesPerTeam || rounds > 50) {
-                showToast(`Số vòng cần từ ${state.gamesPerTeam} đến 50.`);
+            const minimumRounds = minimumRoundsForGames(state.teams.length, state.gamesPerTeam, state.homeAwayEnabled);
+            if (!Number.isInteger(rounds) || rounds < minimumRounds || rounds > 50) {
+                showToast(`Số vòng cần từ ${minimumRounds} đến 50.`);
                 return;
             }
             state.rounds = rounds;
@@ -2816,8 +3004,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 showToast('Tên đội không được trùng nhau.');
                 return;
             }
-            if (state.competitionType !== 'bracket' && state.gamesPerTeam > Math.min(state.rounds, teams.length - 1)) {
-                showToast(`Với ${teams.length} đội, số trận mỗi đội tối đa là ${Math.min(state.rounds, teams.length - 1)}.`);
+            const maxGames = maxGamesPerTeam(teams.length, state.rounds, state.homeAwayEnabled);
+            const minimumGames = state.homeAwayEnabled ? (teams.length % 2 === 1 ? 4 : 2) : 1;
+            const gamesStep = state.homeAwayEnabled ? (teams.length % 2 === 1 ? 4 : 2) : 1;
+            if (state.competitionType !== 'bracket' &&
+                (state.gamesPerTeam > maxGames ||
+                    state.homeAwayEnabled && (state.gamesPerTeam < minimumGames || state.gamesPerTeam % gamesStep !== 0))) {
+                showToast(`Với ${teams.length} đội, số trận mỗi đội tối đa là ${maxGames}${state.homeAwayEnabled ? ' (số chẵn)' : ''}.`);
                 return;
             }
             const nextColors = {};
@@ -2872,34 +3065,73 @@ document.addEventListener('DOMContentLoaded', () => {
                 showToast('Trận đấu chưa xác định đủ hai đội.');
                 return;
             }
-            const homeScore = parseMatchScore(formData.get('home-score'));
-            const awayScore = parseMatchScore(formData.get('away-score'));
-            const date = String(formData.get('match-date') || '');
-            const time = String(formData.get('match-time') || '');
             const winnerChoice = String(formData.get('bracket-winner') || '');
-            if ([homeScore, awayScore].some(score => score !== null && (!Number.isInteger(score) || score < 0 || score > 999))) {
-                showToast('Tỉ số phải là số nguyên từ 0 đến 999.');
-                return;
-            }
-            if ((homeScore === null) !== (awayScore === null)) {
-                showToast('Hãy nhập tỉ số cho cả hai đội hoặc để trống cả hai.');
-                return;
-            }
-            if (homeScore !== null && homeScore === awayScore &&
-                winnerChoice !== match.home && winnerChoice !== match.away) {
-                showToast('Chọn đội thắng khi tỉ số hòa để xác định đội đi tiếp.');
-                return;
-            }
-            if (!validDateTime(date, time)) {
-                showToast('Ngày và giờ cần là ngày hợp lệ, đồng thời phải nhập cùng nhau.');
-                return;
+            let homeScore;
+            let awayScore;
+            if (state.homeAwayEnabled) {
+                const legs = [0, 1].map(index => ({
+                    homeScore: parseMatchScore(formData.get(`leg-${index}-home-score`)),
+                    awayScore: parseMatchScore(formData.get(`leg-${index}-away-score`)),
+                    date: String(formData.get(`leg-${index}-date`) || ''),
+                    time: String(formData.get(`leg-${index}-time`) || '')
+                }));
+                for (const leg of legs) {
+                    if ([leg.homeScore, leg.awayScore].some(score =>
+                        score !== null && (!Number.isInteger(score) || score < 0 || score > 999))) {
+                        showToast('Tỉ số mỗi lượt phải là số nguyên từ 0 đến 999.');
+                        return;
+                    }
+                    if ((leg.homeScore === null) !== (leg.awayScore === null)) {
+                        showToast('Hãy nhập tỉ số cho cả hai đội ở mỗi lượt hoặc để trống cả lượt.');
+                        return;
+                    }
+                    if (!validDateTime(leg.date, leg.time)) {
+                        showToast('Ngày và giờ mỗi lượt cần hợp lệ, đồng thời phải nhập cùng nhau.');
+                        return;
+                    }
+                }
+                const complete = legs.every(leg =>
+                    Number.isInteger(leg.homeScore) && Number.isInteger(leg.awayScore));
+                homeScore = complete ? legs.reduce((total, leg) => total + leg.homeScore, 0) : null;
+                awayScore = complete ? legs.reduce((total, leg) => total + leg.awayScore, 0) : null;
+                if (complete && homeScore === awayScore &&
+                    winnerChoice !== match.home && winnerChoice !== match.away) {
+                    showToast('Chọn đội thắng khi tổng tỉ số hai lượt hòa.');
+                    return;
+                }
+                match.legs = legs;
+                match.date = '';
+                match.time = '';
+            } else {
+                homeScore = parseMatchScore(formData.get('home-score'));
+                awayScore = parseMatchScore(formData.get('away-score'));
+                const date = String(formData.get('match-date') || '');
+                const time = String(formData.get('match-time') || '');
+                if ([homeScore, awayScore].some(score =>
+                    score !== null && (!Number.isInteger(score) || score < 0 || score > 999))) {
+                    showToast('Tỉ số phải là số nguyên từ 0 đến 999.');
+                    return;
+                }
+                if ((homeScore === null) !== (awayScore === null)) {
+                    showToast('Hãy nhập tỉ số cho cả hai đội hoặc để trống cả hai.');
+                    return;
+                }
+                if (homeScore !== null && homeScore === awayScore &&
+                    winnerChoice !== match.home && winnerChoice !== match.away) {
+                    showToast('Chọn đội thắng khi tỉ số hòa để xác định đội đi tiếp.');
+                    return;
+                }
+                if (!validDateTime(date, time)) {
+                    showToast('Ngày và giờ cần là ngày hợp lệ, đồng thời phải nhập cùng nhau.');
+                    return;
+                }
+                match.date = date;
+                match.time = time;
             }
             match.homeScore = homeScore;
             match.awayScore = awayScore;
             delete match.randomResult;
             match.winnerChoice = homeScore !== null && homeScore === awayScore ? winnerChoice : null;
-            match.date = date;
-            match.time = time;
             match.comment = String(formData.get('comment') || '').trim();
             resolveBracketProgression();
             renderSchedule();
@@ -2969,13 +3201,26 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function validScheduleSettings(games, rounds) {
-        if (!Number.isInteger(rounds) || rounds < 1 || rounds > 50) {
-            showToast('Số tuần / vòng phải từ 1 đến 50.');
+        const minimumRounds = state.homeAwayEnabled ? 2 : 1;
+        if (!Number.isInteger(rounds) || rounds < minimumRounds || rounds > 50) {
+            showToast(`Số tuần / vòng phải từ ${minimumRounds} đến 50.`);
             return false;
         }
-        const maxGames = Math.min(rounds, state.teams.length - 1);
-        if (!Number.isInteger(games) || games < 1 || games > maxGames) {
-            showToast(`Số trận mỗi đội cần từ 1 đến ${maxGames}.`);
+        const requiredRounds = minimumRoundsForGames(state.teams.length, games, state.homeAwayEnabled);
+        if (state.homeAwayEnabled && Number.isInteger(games) && games >= 2 && games % 2 === 0 &&
+            state.teams.length * (games / 2) % 2 === 0 &&
+            rounds < requiredRounds) {
+            showToast(`Với ${games} trận mỗi đội, cần ít nhất ${requiredRounds} vòng để xếp đủ hai lượt.`);
+            return false;
+        }
+        const maxGames = maxGamesPerTeam(state.teams.length, rounds, state.homeAwayEnabled);
+        const minimumGames = state.homeAwayEnabled ? (state.teams.length % 2 === 1 ? 4 : 2) : 1;
+        const gamesStep = state.homeAwayEnabled ? (state.teams.length % 2 === 1 ? 4 : 2) : 1;
+        if (!Number.isInteger(games) || games < minimumGames || games > maxGames ||
+            state.homeAwayEnabled && games % gamesStep !== 0) {
+            showToast(`Số trận mỗi đội cần là ${state.homeAwayEnabled
+                ? (state.teams.length % 2 === 1 ? 'bội số của 4' : 'số chẵn từ 2')
+                : 'số nguyên từ 1'} đến ${maxGames}.`);
             return false;
         }
         return true;
@@ -3548,6 +3793,7 @@ document.addEventListener('DOMContentLoaded', () => {
             state.scoring = getSportPreset('');
             state.roundSchedules = {};
             state.competitionType = 'round-robin';
+            state.homeAwayEnabled = false;
             state.bracketFormat = 'single';
             state.bracketConsolation = 'none';
             state.bracketThirdPlaceEnabled = false;
@@ -3591,6 +3837,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.competitionType === 'bracket') {
             lines.push(
                 `Thể thức: ${state.bracketFormat === 'double' ? 'Loại kép' : 'Loại đơn'}`,
+                `Thi đấu: ${state.homeAwayEnabled ? 'Lượt đi, lượt về' : 'Một trận mỗi vòng'}`,
                 `Nhánh phụ: ${state.bracketFormat === 'double' ? 'Nhánh thua' : ({
                     none: 'Không có',
                     full: 'Consolation đầy đủ'
@@ -3604,11 +3851,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     ? ` (${game.homeScore}–${game.awayScore})`
                     : '';
                 const dateTime = game.date || game.time ? ` [${formatMatchDateTime(game.date, game.time)}]` : '';
+                const legs = state.homeAwayEnabled ? ` [${game.legs.map((leg, index) => {
+                    const legScore = Number.isInteger(leg.homeScore) && Number.isInteger(leg.awayScore)
+                        ? `${leg.homeScore}–${leg.awayScore}`
+                        : 'chưa có tỉ số';
+                    const legDate = leg.date || leg.time
+                        ? `, ${formatMatchDateTime(leg.date, leg.time)}`
+                        : '';
+                    return `${index === 0 ? 'Lượt đi' : 'Lượt về'}: ${legScore}${legDate}`;
+                }).join('; ')}]` : '';
                 const bye = game.round === 1 && (game.home || game.away) && !(game.home && game.away)
                     ? ' — Miễn đấu'
                     : '';
                 const winner = game.winner ? ` — Đi tiếp: ${game.winner}` : '';
-                lines.push(`Vòng ${game.round}, trận ${game.position + 1}: ${home} vs ${away}${score}${dateTime}${bye}${winner}`);
+                lines.push(`Vòng ${game.round}, trận ${game.position + 1}: ${home} vs ${away}${score}${legs}${dateTime}${bye}${winner}`);
             });
             const thirdPlaceGame = state.thirdPlaceGame;
             if (thirdPlaceGame && thirdPlaceGame.home && thirdPlaceGame.away) {
@@ -3619,10 +3875,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 const dateTime = thirdPlaceGame.date || thirdPlaceGame.time
                     ? ` [${formatMatchDateTime(thirdPlaceGame.date, thirdPlaceGame.time)}]`
                     : '';
+                const legs = state.homeAwayEnabled ? ` [${thirdPlaceGame.legs.map((leg, index) => {
+                    const legScore = Number.isInteger(leg.homeScore) && Number.isInteger(leg.awayScore)
+                        ? `${leg.homeScore}–${leg.awayScore}`
+                        : 'chưa có tỉ số';
+                    const legDate = leg.date || leg.time
+                        ? `, ${formatMatchDateTime(leg.date, leg.time)}`
+                        : '';
+                    return `${index === 0 ? 'Lượt đi' : 'Lượt về'}: ${legScore}${legDate}`;
+                }).join('; ')}]` : '';
                 const winner = thirdPlaceGame.winner
                     ? ` — Hạng ba: ${thirdPlaceGame.winner}`
                     : '';
-                lines.push(`Tranh hạng ba: ${thirdPlaceGame.home} vs ${thirdPlaceGame.away}${score}${dateTime}${winner}`);
+                lines.push(`Tranh hạng ba: ${thirdPlaceGame.home} vs ${thirdPlaceGame.away}${score}${legs}${dateTime}${winner}`);
             }
             return lines.join('\n');
         }
@@ -3631,6 +3896,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 lines.push(`Nhánh ${index + 1}: Hạng ${branch.start}–${branch.end} — ${branch.format === 'bracket' ? 'Loại trực tiếp' : 'Vòng tròn'}${branch.thirdPlace ? ' · Có tranh hạng ba' : ''}.`);
             });
         }
+        if (state.homeAwayEnabled) lines.push('Thi đấu: lượt đi, lượt về; các cặp đổi sân ở lượt về.');
         const advanceFixtures = state.advanceEnabled ? buildAdvanceFixtures() : [];
         for (let round = 1; round <= state.rounds; round += 1) {
             const roundSchedule = getRoundSchedule(round);
