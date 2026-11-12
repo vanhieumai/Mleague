@@ -820,6 +820,11 @@ body.bracket-expanded-open .app-shell > main > :not(.schedule-view) {
         max-height: none;
         overflow: visible;
     }
+    .side-panel-toggle {
+        grid-column: 1 / -1;
+        justify-self: center;
+    }
+    .side-panel-toggle i { transform: rotate(90deg); }
     .side-panel .button-dark { grid-column: 1 / -1; }
     .side-divider, .side-note { grid-column: 1 / -1; }
 }
