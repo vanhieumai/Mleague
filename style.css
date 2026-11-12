@@ -178,7 +178,12 @@ main { flex: 1; }
 .bracket-lower-section h3 { margin: 0; color: #59656d; font-size: 11px; }
 .bracket-lower-section > p { margin: 3px 0 0; color: #848d92; font-size: 9px; }
 .third-place-preview { display: grid; grid-template-columns: auto minmax(155px, 230px); align-items: center; gap: 10px; }
-.third-place-preview .bracket-match-card { min-height: 0; }
+.third-place-preview .bracket-match-card { width: 100%; min-height: 0; padding: 0; font: inherit; text-align: left; }
+.third-place-preview .bracket-match-card.bracket-editable { cursor: pointer; }
+.third-place-preview .bracket-match-card.bracket-editable:hover { border-color: #83bd89; }
+.third-place-preview .bracket-team { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; }
+.third-place-preview .bracket-team > b { margin-left: 8px; font-variant-numeric: tabular-nums; }
+.third-place-preview .bracket-team-winner { color: #267c36; background: #f0f8f1; font-weight: 700; }
 .bracket-display-title { margin: 3px 0 12px; color: #373e44; font-size: 17px; }
 .bracket-active .schedule-layout { grid-template-columns: minmax(0, 1fr) 205px; }
 .side-panel-collapsed .schedule-layout { grid-template-columns: minmax(0, 1fr) 42px; }

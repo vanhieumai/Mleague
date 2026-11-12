@@ -33,6 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
         competitionType: 'round-robin',
         bracketFormat: 'single',
         bracketConsolation: 'none',
+        thirdPlaceGame: null,
         advanceEnabled: false,
         advanceBranches: [{ start: 1, end: 4, format: 'bracket' }],
         advanceFixtureSchedules: {},
@@ -378,6 +379,11 @@ document.addEventListener('DOMContentLoaded', () => {
         state.bracketGames = state.competitionType === 'bracket' && validBracketGames(data.bracketGames, data.teams)
             ? data.bracketGames.map(game => ({ ...game }))
             : state.competitionType === 'bracket' ? buildBracketGames(data.teams) : [];
+        state.thirdPlaceGame = state.competitionType === 'bracket'
+            ? validThirdPlaceGame(data.thirdPlaceGame, data.teams)
+                ? { ...data.thirdPlaceGame }
+                : createEmptyBracketGame()
+            : null;
         if (state.competitionType === 'bracket') resolveBracketProgression();
         state.advanceEnabled = Boolean(data.advanceEnabled) &&
             state.competitionType === 'round-robin';
@@ -549,7 +555,9 @@ document.addEventListener('DOMContentLoaded', () => {
             : ({
             none: 'Chỉ tạo nhánh vô địch; đội thua bị loại.',
             full: 'Đội thua tiếp tục ở nhánh phụ để xếp hạng; số vòng phụ sẽ tùy thuộc số đội.',
-            'third-place': 'Hai đội thua ở bán kết thi đấu thêm một trận tranh hạng ba.'
+            'third-place': teamCount >= 4
+                ? 'Hai đội thua ở bán kết thi đấu thêm một trận tranh hạng ba.'
+                : 'Cần ít nhất 4 đội để tổ chức trận tranh hạng ba.'
             }[consolation]);
         document.getElementById('consolation-description').textContent = description;
         const hint = document.getElementById('setup-hint');
@@ -721,7 +729,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }).join('');
         const format = state.bracketFormat === 'double' ? 'Loại kép' : 'Loại đơn';
         let consolationPreview = '';
-        if (state.bracketFormat === 'double' || state.bracketConsolation !== 'none') {
+        if (state.bracketFormat === 'single' && state.bracketConsolation === 'third-place' &&
+            state.teams.length >= 4) {
+            consolationPreview = `<div class="bracket-static-supplement"><section class="bracket-lower-section third-place-preview">
+                <h3>Tranh hạng ba</h3>${thirdPlaceMatchMarkup()}
+            </section></div>`;
+        } else if (state.bracketFormat === 'double' ||
+            state.bracketConsolation === 'full') {
             const preview = document.createElement('template');
             preview.innerHTML = bracketMarkup(
                 state.teams.length,
@@ -750,6 +764,26 @@ document.addEventListener('DOMContentLoaded', () => {
             ${state.bracketFormat !== 'double' && state.bracketGames.some(game => game.winner && game.round === rounds)
                 ? `<div class="bracket-champion"><i class="fa-solid fa-trophy"></i> Vô địch: <strong>${escapeHtml(state.bracketGames.find(game => game.round === rounds).winner)}</strong></div>` : ''}
             <p class="bracket-preview-note">Các đội được miễn vòng đầu xuất hiện từ vòng kế tiếp. Khi nhập tỉ số hòa, hãy chọn đội thắng để cập nhật nhánh.</p>`;
+    }
+
+    function thirdPlaceMatchMarkup() {
+        const game = state.thirdPlaceGame || createEmptyBracketGame();
+        const ready = Boolean(game.home && game.away);
+        const scored = Number.isInteger(game.homeScore) && Number.isInteger(game.awayScore);
+        const schedule = formatMatchDateTime(game.date, game.time);
+        return `<button class="bracket-match-card${ready ? ' bracket-editable' : ' bracket-tbd'}${game.winner ? ' bracket-winner' : ''}"
+                type="button" data-third-place-match aria-label="Trận tranh hạng ba: ${escapeHtml(game.home || 'Chờ đội thua bán kết 1')} gặp ${escapeHtml(game.away || 'Chờ đội thua bán kết 2')}"
+                ${!ready || readOnlyView ? ' disabled' : ''}>
+            <span class="bracket-match-code">Trận tranh hạng ba</span>
+            <span class="bracket-team${game.winner === game.home ? ' bracket-team-winner' : ''}">
+                ${escapeHtml(game.home || 'Đội thua bán kết 1')}<b>${scored ? game.homeScore : ''}</b>
+            </span>
+            <span class="bracket-team${game.winner === game.away ? ' bracket-team-winner' : ''}">
+                ${escapeHtml(game.away || 'Đội thua bán kết 2')}<b>${scored ? game.awayScore : ''}</b>
+            </span>
+            ${schedule ? `<small class="bracket-game-schedule"><i class="fa-regular fa-clock"></i> ${escapeHtml(schedule)}</small>` : ''}
+            ${game.comment ? `<small class="bracket-game-comment">${escapeHtml(game.comment)}</small>` : ''}
+        </button>`;
     }
 
     function bracketMatchCode(game) {
@@ -1000,6 +1034,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const bracketGame = event.target.closest('[data-bracket-game]');
         if (bracketGame && !readOnlyView && !bracketGame.disabled) {
             openModal('edit-bracket-match', Number(bracketGame.dataset.bracketGame));
+            return;
+        }
+        const thirdPlaceMatch = event.target.closest('[data-third-place-match]');
+        if (thirdPlaceMatch && !readOnlyView && !thirdPlaceMatch.disabled) {
+            openModal('edit-third-place-match');
             return;
         }
         const advanceFixture = event.target.closest('[data-advance-fixture-code]');
@@ -1447,12 +1486,14 @@ document.addEventListener('DOMContentLoaded', () => {
         state.advanceFixtureResults = {};
         if (state.competitionType === 'bracket') {
             state.rounds = Math.ceil(Math.log2(state.teams.length));
+            state.thirdPlaceGame = createEmptyBracketGame();
             state.bracketGames = reshuffleBracket
                 ? buildRegeneratedBracketGames(state.teams, state.bracketGames)
                 : buildBracketGames(state.teams);
             resolveBracketProgression();
         } else {
             state.bracketGames = [];
+            state.thirdPlaceGame = null;
         }
         Object.keys(state.roundSchedules).forEach(round => {
             if (Number(round) > state.rounds) delete state.roundSchedules[round];
@@ -1495,7 +1536,7 @@ document.addEventListener('DOMContentLoaded', () => {
             match.homeForfeit || match.awayForfeit || match.friendly
         );
         return state.competitionType === 'bracket'
-            ? state.bracketGames.some(hasMatchDetails)
+            ? state.bracketGames.some(hasMatchDetails) || hasMatchDetails(state.thirdPlaceGame || {})
             : state.matches.some(hasMatchDetails) ||
                 Object.keys(state.advanceFixtureSchedules).length > 0 ||
                 Object.keys(state.advanceFixtureResults).length > 0;
@@ -1523,6 +1564,31 @@ document.addEventListener('DOMContentLoaded', () => {
                 (game.homeScore === null || Number.isInteger(game.homeScore) && game.homeScore >= 0 && game.homeScore <= 999) &&
                 (game.awayScore === null || Number.isInteger(game.awayScore) && game.awayScore >= 0 && game.awayScore <= 999) &&
                 (game.winnerChoice === null || teams.includes(game.winnerChoice))) && expectedPositions.size === 0;
+    }
+
+    function validThirdPlaceGame(game, teams) {
+        return Boolean(game && typeof game === 'object' && !Array.isArray(game) &&
+            (game.home === null || teams.includes(game.home)) &&
+            (game.away === null || teams.includes(game.away)) &&
+            (game.homeScore === null || Number.isInteger(game.homeScore) && game.homeScore >= 0 && game.homeScore <= 999) &&
+            (game.awayScore === null || Number.isInteger(game.awayScore) && game.awayScore >= 0 && game.awayScore <= 999) &&
+            (game.winnerChoice === null || game.winnerChoice === game.home || game.winnerChoice === game.away) &&
+            typeof game.date === 'string' && typeof game.time === 'string' &&
+            validDateTime(game.date, game.time) && typeof game.comment === 'string');
+    }
+
+    function createEmptyBracketGame() {
+        return {
+            home: null,
+            away: null,
+            homeScore: null,
+            awayScore: null,
+            winnerChoice: null,
+            winner: null,
+            date: '',
+            time: '',
+            comment: ''
+        };
     }
 
     function buildBracketGames(teams) {
@@ -1586,6 +1652,32 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
         });
+        const thirdPlaceEnabled = state.bracketFormat === 'single' &&
+            state.bracketConsolation === 'third-place' && state.teams.length >= 4;
+        if (!thirdPlaceEnabled) {
+            state.thirdPlaceGame = createEmptyBracketGame();
+            return;
+        }
+        const semifinalRound = rounds - 1;
+        const semifinalLosers = state.bracketGames
+            .filter(game => game.round === semifinalRound && game.home && game.away && game.winner)
+            .map(game => game.winner === game.home ? game.away : game.home);
+        const game = state.thirdPlaceGame || (state.thirdPlaceGame = createEmptyBracketGame());
+        const home = semifinalLosers.length === 2 ? semifinalLosers[0] : null;
+        const away = semifinalLosers.length === 2 ? semifinalLosers[1] : null;
+        if (game.home !== home || game.away !== away) {
+            game.homeScore = null;
+            game.awayScore = null;
+            game.winnerChoice = null;
+        }
+        game.home = home;
+        game.away = away;
+        game.winner = null;
+        if (home && away && Number.isInteger(game.homeScore) && Number.isInteger(game.awayScore)) {
+            if (game.homeScore > game.awayScore) game.winner = home;
+            else if (game.awayScore > game.homeScore) game.winner = away;
+            else if (game.winnerChoice === home || game.winnerChoice === away) game.winner = game.winnerChoice;
+        }
     }
 
     function buildSchedule(teams, gamesPerTeam, rounds) {
@@ -2167,6 +2259,7 @@ document.addEventListener('DOMContentLoaded', () => {
             'add-game': 'Thêm trận đấu',
             'edit-match': 'Chỉnh sửa trận đấu',
             'edit-bracket-match': 'Chỉnh sửa trận đấu',
+            'edit-third-place-match': 'Chỉnh sửa trận tranh hạng ba',
             'advance-fixture-schedule': 'Ngày giờ trận loại trực tiếp',
             checker: 'Kiểm tra lịch thi đấu',
             standings: 'Bảng xếp hạng',
@@ -2190,7 +2283,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const modal = modalBackdrop.querySelector('.modal');
         modal.classList.toggle('checker-wide', kind === 'checker' || kind === 'standings');
         modal.classList.toggle('match-editor', kind === 'edit-match' || kind === 'add-game' ||
-            kind === 'edit-bracket-match' || kind === 'advance-fixture-schedule');
+            kind === 'edit-bracket-match' || kind === 'edit-third-place-match' ||
+            kind === 'advance-fixture-schedule');
         modalBackdrop.classList.remove('hidden');
         const firstInput = modalContent.querySelector('input, textarea, select');
         if (firstInput) firstInput.focus();
@@ -2198,13 +2292,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function modalFields(kind, matchIndex) {
         const match = kind === 'edit-match' ? state.matches[matchIndex] : null;
-        const bracketMatch = kind === 'edit-bracket-match' ? state.bracketGames[matchIndex] : null;
+        const bracketMatch = kind === 'edit-bracket-match'
+            ? state.bracketGames[matchIndex]
+            : kind === 'edit-third-place-match' ? state.thirdPlaceGame : null;
         const teamOptions = (selectedTeam = '') => state.teams.map(team =>
             `<option value="${escapeHtml(team)}"${team === selectedTeam ? ' selected' : ''}>${escapeHtml(team)}</option>`).join('');
         const roundOptions = Array.from({ length: state.rounds }, (_, index) =>
             `<option value="${index + 1}"${match && match.round === index + 1 ? ' selected' : ''}>Vòng ${index + 1}</option>`).join('');
 
-        if (kind === 'edit-bracket-match' && bracketMatch) {
+        if ((kind === 'edit-bracket-match' || kind === 'edit-third-place-match') && bracketMatch) {
             const winnerOptions = [bracketMatch.home, bracketMatch.away].filter(Boolean).map(team =>
                 `<option value="${escapeHtml(team)}"${bracketMatch.winnerChoice === team ? ' selected' : ''}>${escapeHtml(team)}</option>`
             ).join('');
@@ -2673,8 +2769,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 settingsDraft = null;
                 return;
             }
-        } else if (activeModal === 'edit-bracket-match') {
-            const match = state.bracketGames[editingMatchIndex];
+        } else if (activeModal === 'edit-bracket-match' || activeModal === 'edit-third-place-match') {
+            const match = activeModal === 'edit-third-place-match'
+                ? state.thirdPlaceGame
+                : state.bracketGames[editingMatchIndex];
             if (!match || !match.home || !match.away) {
                 showToast('Trận đấu chưa xác định đủ hai đội.');
                 return;
@@ -3337,6 +3435,7 @@ document.addEventListener('DOMContentLoaded', () => {
             state.advanceFixtureSchedules = {};
             state.advanceFixtureResults = {};
             state.bracketGames = [];
+            state.thirdPlaceGame = null;
             state.contact = '';
             state.draft = false;
             state.matches = [];
@@ -3390,6 +3489,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 const winner = game.winner ? ` — Đi tiếp: ${game.winner}` : '';
                 lines.push(`Vòng ${game.round}, trận ${game.position + 1}: ${home} vs ${away}${score}${dateTime}${bye}${winner}`);
             });
+            const thirdPlaceGame = state.thirdPlaceGame;
+            if (thirdPlaceGame && thirdPlaceGame.home && thirdPlaceGame.away) {
+                const score = Number.isInteger(thirdPlaceGame.homeScore) &&
+                    Number.isInteger(thirdPlaceGame.awayScore)
+                    ? ` (${thirdPlaceGame.homeScore}–${thirdPlaceGame.awayScore})`
+                    : '';
+                const dateTime = thirdPlaceGame.date || thirdPlaceGame.time
+                    ? ` [${formatMatchDateTime(thirdPlaceGame.date, thirdPlaceGame.time)}]`
+                    : '';
+                const winner = thirdPlaceGame.winner
+                    ? ` — Hạng ba: ${thirdPlaceGame.winner}`
+                    : '';
+                lines.push(`Tranh hạng ba: ${thirdPlaceGame.home} vs ${thirdPlaceGame.away}${score}${dateTime}${winner}`);
+            }
             return lines.join('\n');
         }
         if (state.advanceEnabled) {
