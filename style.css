@@ -819,8 +819,8 @@ body.bracket-expanded-open .app-shell > main > :not(.schedule-view) {
         z-index: 8;
         top: auto;
         right: 12px;
-        bottom: 96px;
-        bottom: calc(96px + env(safe-area-inset-bottom));
+        bottom: 16px;
+        bottom: calc(16px + env(safe-area-inset-bottom));
         width: min(360px, calc(100vw - 24px));
         max-height: calc(100vh - 120px);
         max-height: calc(100dvh - 120px);
