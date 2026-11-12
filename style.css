@@ -815,16 +815,41 @@ body.bracket-expanded-open .app-shell > main > :not(.schedule-view) {
     .bracket-active .schedule-layout,
     .side-panel-collapsed .schedule-layout { grid-template-columns: minmax(0, 1fr); }
     .side-panel {
-        position: static;
+        position: fixed;
+        z-index: 8;
+        top: auto;
+        right: 12px;
+        bottom: 96px;
+        bottom: calc(96px + env(safe-area-inset-bottom));
+        width: min(360px, calc(100vw - 24px));
+        max-height: calc(100vh - 120px);
+        max-height: calc(100dvh - 120px);
         grid-template-columns: 1fr 1fr;
-        max-height: none;
-        overflow: visible;
+        padding: 10px;
+        overflow-y: auto;
+        border: 1px solid #e6e9e7;
+        border-radius: 12px;
+        background: #fff;
+        box-shadow: 0 6px 24px rgb(34 42 54 / 16%);
+    }
+    .side-panel-collapsed .side-panel {
+        width: 42px;
+        min-width: 42px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        box-shadow: none;
     }
     .side-panel-toggle {
         grid-column: 1 / -1;
-        justify-self: center;
+        justify-self: end;
     }
     .side-panel-toggle i { transform: rotate(90deg); }
+    .side-panel-collapsed .side-panel-toggle {
+        width: 42px;
+        height: 42px;
+        justify-self: center;
+    }
     .side-panel .button-dark { grid-column: 1 / -1; }
     .side-divider, .side-note { grid-column: 1 / -1; }
 }
