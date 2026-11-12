@@ -472,6 +472,9 @@ body.bracket-expanded-open .app-shell > main > :not(.schedule-view) {
 .tournament-match-summary strong { font-size: 13px; }
 .tournament-match-summary span { color: #75867a; font-size: 11px; }
 .advance-round-section .round-heading h2 { font-size: 15px; }
+.advance-round-section .round-heading-actions { flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.advance-round-home-away { display: inline-flex; align-items: center; gap: 5px; color: #68756b; font-size: 10px; white-space: nowrap; cursor: pointer; }
+.advance-round-home-away input { width: 14px; height: 14px; margin: 0; accent-color: var(--green); }
 .match-row.advance-fixture-row {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas: "meta" "pair" "date";

@@ -38,6 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
         thirdPlaceGame: null,
         advanceEnabled: false,
         advanceBranches: [{ start: 1, end: 4, format: 'bracket', thirdPlace: false }],
+        advanceFixtureRoundModes: {},
         advanceFixtureSchedules: {},
         advanceFixtureResults: {},
         bracketGames: [],
@@ -63,6 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let sidePanelCollapsed = false;
     let bracketExpanded = false;
     let editingAdvanceFixtureCode = '';
+    let editingAdvanceFixtureLegIndex = -1;
 
     function firebaseConfigReady() {
         const config = window.MLEAGUE_FIREBASE_CONFIG;
@@ -411,12 +413,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 schedule && typeof schedule.date === 'string' && typeof schedule.time === 'string' &&
                 validDateTime(schedule.date, schedule.time) && schedule.date && schedule.time))
             : {};
+        state.advanceFixtureRoundModes = data.advanceFixtureRoundModes &&
+            typeof data.advanceFixtureRoundModes === 'object' && !Array.isArray(data.advanceFixtureRoundModes)
+            ? Object.fromEntries(Object.entries(data.advanceFixtureRoundModes).filter(([key, enabled]) =>
+                /^N\d+-V\d+$/.test(key) && enabled === true))
+            : {};
         state.advanceFixtureResults = data.advanceFixtureResults &&
             typeof data.advanceFixtureResults === 'object' && !Array.isArray(data.advanceFixtureResults)
             ? Object.fromEntries(Object.entries(data.advanceFixtureResults).filter(([, result]) =>
                 result && typeof result.home === 'string' && typeof result.away === 'string' &&
-                Number.isInteger(result.homeScore) && result.homeScore >= 0 && result.homeScore <= 999 &&
-                Number.isInteger(result.awayScore) && result.awayScore >= 0 && result.awayScore <= 999 &&
+                validAdvanceScorePair(result.homeScore, result.awayScore, 1998) &&
+                (!result.legs || validAdvanceFixtureLegs(result.legs)) &&
                 (result.winner === null || typeof result.winner === 'string')))
             : {};
         if (!state.advanceBranches.length) {
@@ -978,6 +985,7 @@ document.addEventListener('DOMContentLoaded', () => {
             : rounds;
         state.advanceFixtureSchedules = {};
         state.advanceFixtureResults = {};
+        state.advanceFixtureRoundModes = {};
         createSchedule();
         setupView.classList.add('hidden');
         scheduleView.classList.remove('hidden');
@@ -1065,6 +1073,39 @@ document.addEventListener('DOMContentLoaded', () => {
         void signOutUser();
     });
     teamFilter.addEventListener('change', renderSchedule);
+    matchList.addEventListener('change', event => {
+        const toggle = event.target.closest('[data-advance-round-home-away]');
+        if (!toggle) return;
+        const key = advanceRoundModeKey(
+            Number(toggle.dataset.advanceRoundBranch),
+            Number(toggle.dataset.advanceRound)
+        );
+        const branchIndex = Number(toggle.dataset.advanceRoundBranch);
+        const round = Number(toggle.dataset.advanceRound);
+        if (toggle.checked) state.advanceFixtureRoundModes[key] = true;
+        else delete state.advanceFixtureRoundModes[key];
+        const affectedRounds = new Set([round]);
+        const branch = state.advanceBranches[branchIndex];
+        if (branch) {
+            const finalRound = Math.ceil(Math.log2(branch.end - branch.start + 1));
+            buildAdvanceFixtures()
+                .filter(fixture => fixture.branchIndex === branchIndex &&
+                    fixture.round > round && !(fixture.thirdPlace && round === finalRound))
+                .forEach(fixture => affectedRounds.add(fixture.round));
+        }
+        let clearedResults = 0;
+        Object.keys(state.advanceFixtureResults).forEach(code => {
+            const match = /^N(\d+)-V(\d+)-M\d+$/.exec(code);
+            if (!match || Number(match[1]) !== branchIndex + 1 ||
+                !affectedRounds.has(Number(match[2]))) return;
+            delete state.advanceFixtureResults[code];
+            clearedResults += 1;
+        });
+        renderSchedule();
+        if (clearedResults) {
+            showToast('Đã xóa kết quả ở vòng này và các vòng sau do thay đổi số lượt.');
+        }
+    });
     matchList.addEventListener('click', event => {
         const clearAdvanceRound = event.target.closest('[data-clear-advance-branch]');
         if (clearAdvanceRound) {
@@ -1129,6 +1170,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const advanceFixture = event.target.closest('[data-advance-fixture-code]');
         if (advanceFixture && !readOnlyView && !advanceFixture.disabled) {
             editingAdvanceFixtureCode = advanceFixture.dataset.advanceFixtureCode;
+            editingAdvanceFixtureLegIndex = Number(advanceFixture.dataset.advanceLegIndex);
             openModal('advance-fixture-schedule');
             return;
         }
@@ -1488,6 +1530,35 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         let generated = 0;
         fixtures.forEach(game => {
+            if (game.homeAwayEnabled) {
+                const legs = game.legs.map(leg => ({ ...leg }));
+                let generatedLegs = 0;
+                legs.forEach(leg => {
+                    if (Number.isInteger(leg.homeScore) && Number.isInteger(leg.awayScore)) return;
+                    [leg.homeScore, leg.awayScore] = randomResultScores();
+                    generatedLegs += 1;
+                });
+                if (!generatedLegs) return;
+                const homeScore = legs.reduce((total, leg) => total + leg.homeScore, 0);
+                const awayScore = legs.reduce((total, leg) => total + leg.awayScore, 0);
+                const winner = homeScore > awayScore ? game.home
+                    : awayScore > homeScore ? game.away
+                        : Math.random() < 0.5 ? game.home : game.away;
+                state.advanceFixtureResults[game.code] = {
+                    home: game.home,
+                    away: game.away,
+                    homeScore,
+                    awayScore,
+                    winner,
+                    legs: legs.map(({ homeScore: legHomeScore, awayScore: legAwayScore }) => ({
+                        homeScore: legHomeScore,
+                        awayScore: legAwayScore
+                    })),
+                    randomResult: true
+                };
+                generated += generatedLegs;
+                return;
+            }
             if (!(Number.isInteger(game.homeScore) && Number.isInteger(game.awayScore))) {
                 const [homeScore, awayScore] = randomResultScores();
                 const winner = homeScore > awayScore ? game.home
@@ -2073,14 +2144,127 @@ document.addEventListener('DOMContentLoaded', () => {
         }).join('');
         matchList.innerHTML = `${state.advanceEnabled
             ? `<div class="tournament-match-summary">
-                <strong>Tổng lịch: ${state.matches.length + advanceFixtures.length} trận</strong>
-                <span>Vòng tròn: ${state.matches.length} trận · Vòng tiếp theo: ${advanceFixtures.length} trận</span>
+                <strong>Tổng lịch: ${state.matches.length + advanceFixtureMatchCount(advanceFixtures)} trận</strong>
+                    <span>Vòng tròn: ${state.matches.length} trận · Vòng tiếp theo: ${advanceFixtureMatchCount(advanceFixtures)} trận</span>
                 ${state.homeAwayEnabled ? '<span>Vòng tròn thi đấu lượt đi, lượt về; các cặp đổi sân ở lượt về.</span>' : ''}
                 <span>Đội ở vòng tiếp theo đang hiển thị theo thứ hạng dự kiến.</span>
             </div>`
             : ''}${roundRobinSections}${state.advanceEnabled ? advanceFixturesMarkup(advanceFixtures) : ''}`;
 
         if (currentUser && currentLeagueId && !readOnlyView && !savingLeague) scheduleAutoSave();
+    }
+
+    function advanceRoundModeKey(branchIndex, round) {
+        return `N${branchIndex + 1}-V${round}`;
+    }
+
+    function isAdvanceRoundHomeAway(branchIndex, round) {
+        return state.advanceFixtureRoundModes[advanceRoundModeKey(branchIndex, round)] === true;
+    }
+
+    function advanceFixtureLegCode(code, legIndex) {
+        return `${code}-L${legIndex + 1}`;
+    }
+
+    function validAdvanceScorePair(homeScore, awayScore, maximum) {
+        const validScore = score => score === null ||
+            Number.isInteger(score) && score >= 0 && score <= maximum;
+        return validScore(homeScore) && validScore(awayScore) &&
+            (homeScore === null) === (awayScore === null);
+    }
+
+    function validAdvanceFixtureLegs(legs) {
+        return Array.isArray(legs) && legs.length === 2 &&
+            legs.every(leg => leg && typeof leg === 'object' &&
+                validAdvanceScorePair(leg.homeScore, leg.awayScore, 999));
+    }
+
+    function emptyAdvanceFixtureLeg() {
+        return { homeScore: null, awayScore: null };
+    }
+
+    function advanceFixtureSchedule(code, legIndex = -1) {
+        const schedule = legIndex >= 0
+            ? state.advanceFixtureSchedules[advanceFixtureLegCode(code, legIndex)] ||
+                (legIndex === 0 ? state.advanceFixtureSchedules[code] : null)
+            : state.advanceFixtureSchedules[code];
+        return schedule || { date: '', time: '' };
+    }
+
+    function buildAdvanceBracketFixture(branchIndex, round, position, code, home, away, extra = {}) {
+        const savedResult = state.advanceFixtureResults[code];
+        const sameTeams = savedResult && savedResult.home === home && savedResult.away === away;
+        const homeAwayEnabled = isAdvanceRoundHomeAway(branchIndex, round);
+        const legs = homeAwayEnabled
+            ? sameTeams && validAdvanceFixtureLegs(savedResult.legs)
+                ? savedResult.legs.map(leg => ({ ...leg }))
+                : sameTeams && Number.isInteger(savedResult.homeScore) && Number.isInteger(savedResult.awayScore)
+                    ? [{ homeScore: savedResult.homeScore, awayScore: savedResult.awayScore }, emptyAdvanceFixtureLeg()]
+                    : [emptyAdvanceFixtureLeg(), emptyAdvanceFixtureLeg()]
+            : [];
+        const complete = homeAwayEnabled && legs.every(leg =>
+            Number.isInteger(leg.homeScore) && Number.isInteger(leg.awayScore));
+        const homeScore = homeAwayEnabled
+            ? complete ? legs.reduce((total, leg) => total + leg.homeScore, 0) : null
+            : sameTeams ? savedResult.homeScore : null;
+        const awayScore = homeAwayEnabled
+            ? complete ? legs.reduce((total, leg) => total + leg.awayScore, 0) : null
+            : sameTeams ? savedResult.awayScore : null;
+        const winner = sameTeams && Number.isInteger(homeScore) && Number.isInteger(awayScore)
+            ? homeScore > awayScore ? home
+                : awayScore > homeScore ? away
+                    : [home, away].includes(savedResult.winner) ? savedResult.winner : null
+            : null;
+        const schedule = advanceFixtureSchedule(code);
+        if (homeAwayEnabled) {
+            legs.forEach((leg, index) => {
+                Object.assign(leg, advanceFixtureSchedule(code, index));
+            });
+        }
+        return {
+            branchIndex,
+            format: 'bracket',
+            round,
+            position,
+            code,
+            home,
+            away,
+            date: homeAwayEnabled ? legs[0].date : schedule.date,
+            time: homeAwayEnabled ? legs[0].time : schedule.time,
+            homeScore,
+            awayScore,
+            winner,
+            homeAwayEnabled,
+            legs,
+            ...extra
+        };
+    }
+
+    function advanceFixtureLegRows(fixture) {
+        if (!fixture.homeAwayEnabled) {
+            return [{ ...fixture, legIndex: -1, displayCode: fixture.code }];
+        }
+        return fixture.legs.map((leg, legIndex) => {
+            const returnLeg = legIndex === 1;
+            const schedule = advanceFixtureSchedule(fixture.code, legIndex);
+            return {
+                ...fixture,
+                legIndex,
+                displayCode: `${fixture.code} · ${returnLeg ? 'Lượt về' : 'Lượt đi'}`,
+                home: returnLeg ? fixture.away : fixture.home,
+                away: returnLeg ? fixture.home : fixture.away,
+                homeScore: returnLeg ? leg.awayScore : leg.homeScore,
+                awayScore: returnLeg ? leg.homeScore : leg.awayScore,
+                date: schedule.date,
+                time: schedule.time,
+                position: fixture.position * 2 + legIndex
+            };
+        });
+    }
+
+    function advanceFixtureMatchCount(fixtures) {
+        return fixtures.reduce((count, fixture) =>
+            count + (fixture.homeAwayEnabled ? 2 : 1), 0);
     }
 
     function buildAdvanceFixtures() {
@@ -2134,25 +2318,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     const away = slots[position * 2 + 1];
                     const code = `N${branchIndex + 1}-V${round}-M${String(position + 1).padStart(2, '0')}`;
                     if (home && away) {
-                        const schedule = state.advanceFixtureSchedules[code] || { date: '', time: '' };
-                        const savedResult = state.advanceFixtureResults[code];
-                        const sameTeams = savedResult && savedResult.home === home && savedResult.away === away;
-                        const homeScore = sameTeams ? savedResult.homeScore : null;
-                        const awayScore = sameTeams ? savedResult.awayScore : null;
-                        const winner = sameTeams && Number.isInteger(homeScore) && Number.isInteger(awayScore)
-                            ? homeScore > awayScore ? home
-                                : awayScore > homeScore ? away
-                                    : [home, away].includes(savedResult.winner) ? savedResult.winner : null
-                            : null;
-                        fixtures.push({
-                            branchIndex, format: branch.format, round, position, code, home, away,
-                            date: schedule.date,
-                            time: schedule.time,
-                            homeScore,
-                            awayScore,
-                            winner
-                        });
-                        nextSlots.push(winner || `Thắng ${code}`);
+                        const fixture = buildAdvanceBracketFixture(
+                            branchIndex, round, position, code, home, away
+                        );
+                        fixtures.push(fixture);
+                        nextSlots.push(fixture.winner || `Thắng ${code}`);
                     } else {
                         nextSlots.push(home || away);
                     }
@@ -2173,35 +2343,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     const round = rounds + 1;
                     const position = 0;
                     const code = `N${branchIndex + 1}-V${round}-M01`;
-                    const schedule = state.advanceFixtureSchedules[code] || { date: '', time: '' };
-                    const savedResult = state.advanceFixtureResults[code];
-                    const sameTeams = savedResult &&
-                        savedResult.home === home &&
-                        savedResult.away === away;
-                    const homeScore = sameTeams ? savedResult.homeScore : null;
-                    const awayScore = sameTeams ? savedResult.awayScore : null;
-                    const winner = sameTeams && Number.isInteger(homeScore) && Number.isInteger(awayScore)
-                        ? homeScore > awayScore ? home
-                            : awayScore > homeScore ? away
-                                : [home, away].includes(savedResult.winner)
-                                    ? savedResult.winner
-                                    : null
-                        : null;
-                    fixtures.push({
-                        branchIndex,
-                        format: branch.format,
-                        round,
-                        position,
-                        code,
-                        home,
-                        away,
-                        date: schedule.date,
-                        time: schedule.time,
-                        homeScore,
-                        awayScore,
-                        winner,
-                        thirdPlace: true
-                    });
+                    fixtures.push(buildAdvanceBracketFixture(
+                        branchIndex, round, position, code, home, away, { thirdPlace: true }
+                    ));
                 }
             }
         });
@@ -2223,7 +2367,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 roundGroups.get(fixture.round).push(fixture);
             });
             roundGroups.forEach((games, round) => {
-                games.sort(compareAdvanceFixtures);
+                const matchRows = games.flatMap(advanceFixtureLegRows).sort(compareAdvanceFixtures);
                 const pendingGames = games.filter(game =>
                     !(Number.isInteger(game.homeScore) && Number.isInteger(game.awayScore))).length;
                 const previousRound = branch.format === 'bracket'
@@ -2237,6 +2381,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     return result && result.randomResult;
                 }).length;
                 const formatTitle = branch.format === 'bracket' ? 'Loại trực tiếp' : 'Vòng tròn';
+                const roundHomeAway = isAdvanceRoundHomeAway(branchIndex, round);
                 sections.push(`<section class="round-section advance-round-section">
                     <div class="round-heading">
                         <h2>Nhánh ${branchIndex + 1} · ${formatTitle} · ${games.some(game => game.thirdPlace)
@@ -2246,6 +2391,14 @@ document.addEventListener('DOMContentLoaded', () => {
                                 ? 'Chung kết'
                                 : `Vòng ${round}`}</h2>
                         <div class="round-heading-actions">
+                            ${branch.format === 'bracket' && !readOnlyView && games.length
+                                ? `<label class="advance-round-home-away">
+                                    <input type="checkbox" data-advance-round-home-away
+                                        data-advance-round-branch="${branchIndex}" data-advance-round="${round}"
+                                        ${roundHomeAway ? 'checked' : ''}>
+                                    <span>Lượt đi, lượt về</span>
+                                </label>`
+                                : ''}
                             ${readOnlyView ? '' : `<button class="random-round-button" type="button"
                                 data-random-advance-branch="${branchIndex}" data-random-advance-round="${round}"
                                 ${canRandomize ? '' : 'disabled'}
@@ -2258,10 +2411,10 @@ document.addEventListener('DOMContentLoaded', () => {
                                 aria-label="Xóa kết quả random nhánh ${branchIndex + 1} vòng ${round}">
                                 <i class="fa-solid fa-eraser"></i><span>Clear</span>
                             </button>`}
-                            <span>${games.length} trận</span>
+                            <span>${matchRows.length} trận</span>
                         </div>
                     </div>
-                    ${games.map(game => advanceFixtureRow(game)).join('')}
+                    ${matchRows.map(game => advanceFixtureRow(game)).join('')}
                 </section>`);
             });
         });
@@ -2285,12 +2438,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const schedule = formatMatchDateTime(game.date, game.time);
         const isEditable = game.format === 'bracket' && !readOnlyView;
         const hasResult = Number.isInteger(game.homeScore) && Number.isInteger(game.awayScore);
-        const ariaLabel = `${game.code}, ${title}: ${game.home} ${hasResult ? `${game.homeScore} – ${game.awayScore}` : 'gặp'} ${game.away}${schedule ? `, ${schedule}` : ', chưa có ngày giờ'}`;
+        const rowCode = game.displayCode || game.code;
+        const ariaLabel = `${rowCode}, ${title}: ${game.home} ${hasResult ? `${game.homeScore} – ${game.awayScore}` : 'gặp'} ${game.away}${schedule ? `, ${schedule}` : ', chưa có ngày giờ'}`;
         return `<button class="match-row advance-fixture-row" type="button"
-                data-advance-fixture-code="${game.code}"${isEditable ? '' : ' disabled'}
+                data-advance-fixture-code="${game.code}" data-advance-leg-index="${game.legIndex}"${isEditable ? '' : ' disabled'}
                 aria-label="${escapeHtml(ariaLabel)}">
             <span class="advance-fixture-meta">
-                <span class="advance-fixture-code">${game.code}</span>
+                <span class="advance-fixture-code">${escapeHtml(rowCode)}</span>
                 <span class="advance-fixture-round">${title}</span>
             </span>
             <span class="advance-fixture-pair">
@@ -2348,6 +2502,23 @@ document.addEventListener('DOMContentLoaded', () => {
             else if (result.outcome === 'draw') stats.draws += 1;
             else if (result.outcome !== 'friendly') stats.losses += 1;
         });
+        const advanceTeamMatches = state.advanceEnabled
+            ? buildAdvanceFixtures()
+                .flatMap(advanceFixtureLegRows)
+                .filter(match => match.home === team || match.away === team)
+            : [];
+        advanceTeamMatches.forEach(match => {
+            if (!Number.isInteger(match.homeScore) || !Number.isInteger(match.awayScore)) return;
+            const homeSide = match.home === team;
+            const teamScore = homeSide ? match.homeScore : match.awayScore;
+            const opponentScore = homeSide ? match.awayScore : match.homeScore;
+            stats.played += 1;
+            stats.scored += teamScore;
+            stats.conceded += opponentScore;
+            if (teamScore > opponentScore) stats.wins += 1;
+            else if (teamScore < opponentScore) stats.losses += 1;
+            else stats.draws += 1;
+        });
 
         const completedForRanking = state.matches.filter(match => !match.friendly && getMatchPoints(match));
         const rankingStats = new Map(state.teams.map(name => [name, {
@@ -2402,27 +2573,26 @@ document.addEventListener('DOMContentLoaded', () => {
                 }));
         }
         if (state.advanceEnabled) {
-            buildAdvanceFixtures()
-                .filter(fixture => fixture.home === team || fixture.away === team)
-                .forEach(fixture => {
+            advanceTeamMatches.forEach(fixture => {
                     const branch = state.advanceBranches[fixture.branchIndex];
                     teamMatches.push({
                         ...fixture,
                         phaseOrder: fixture.branchIndex + 2,
                         phase: `Nhánh ${fixture.branchIndex + 1} · ${branch.format === 'bracket' ? 'Loại trực tiếp' : 'Vòng tròn'}`,
-                        title: fixture.thirdPlace
+                        title: `${fixture.thirdPlace
                             ? 'Tranh hạng ba'
                             : branch.format === 'bracket' &&
                             fixture.round === Math.ceil(Math.log2(branch.end - branch.start + 1))
                             ? 'Chung kết'
-                            : `Vòng ${fixture.round}`,
+                            : `Vòng ${fixture.round}`}${fixture.homeAwayEnabled
+                                ? ` · ${fixture.legIndex === 0 ? 'Lượt đi' : 'Lượt về'}`
+                                : ''}`,
                         schedule: {
                             date: fixture.date || '',
                             time: fixture.time || ''
                         },
                         complete: Number.isInteger(fixture.homeScore) &&
-                            Number.isInteger(fixture.awayScore) &&
-                            (fixture.format !== 'bracket' || Boolean(fixture.winner))
+                            Number.isInteger(fixture.awayScore)
                     });
                 });
         }
@@ -2717,13 +2887,19 @@ document.addEventListener('DOMContentLoaded', () => {
         if (kind === 'advance-fixture-schedule') {
             const fixture = buildAdvanceFixtures().find(game => game.code === editingAdvanceFixtureCode);
             if (!fixture || fixture.format !== 'bracket') return '';
+            const legIndex = editingAdvanceFixtureLegIndex;
+            const returnLeg = legIndex === 1;
+            const legHome = returnLeg ? fixture.away : fixture.home;
+            const legAway = returnLeg ? fixture.home : fixture.away;
+            const schedule = advanceFixtureSchedule(fixture.code, legIndex);
+            const legTitle = legIndex >= 0 ? ` · ${returnLeg ? 'Lượt về' : 'Lượt đi'}` : '';
             return `<div class="round-schedule-form">
-                <p class="round-schedule-help"><strong>${escapeHtml(fixture.code)}</strong> · ${escapeHtml(fixture.home)} vs ${escapeHtml(fixture.away)}. Lịch được sắp xếp theo ngày giờ đã đặt.</p>
+                <p class="round-schedule-help"><strong>${escapeHtml(fixture.code)}${legTitle}</strong> · ${escapeHtml(legHome)} vs ${escapeHtml(legAway)}. Lịch được sắp xếp theo ngày giờ đã đặt.</p>
                 <label class="form-field">Ngày thi đấu
-                    <input name="advance-date" type="date" value="${escapeHtml(fixture.date || '')}">
+                    <input name="advance-date" type="date" value="${escapeHtml(schedule.date || '')}">
                 </label>
                 <label class="form-field">Giờ bắt đầu
-                    <input name="advance-time" type="time" value="${escapeHtml(fixture.time || '')}">
+                    <input name="advance-time" type="time" value="${escapeHtml(schedule.time || '')}">
                 </label>
                 <small class="round-schedule-help">Để trống cả hai trường rồi lưu để xóa lịch trận này.</small>
             </div>`;
@@ -2982,10 +3158,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 showToast('Ngày và giờ cần là ngày hợp lệ, đồng thời phải nhập cùng nhau.');
                 return;
             }
+            const scheduleCode = editingAdvanceFixtureLegIndex >= 0
+                ? advanceFixtureLegCode(editingAdvanceFixtureCode, editingAdvanceFixtureLegIndex)
+                : editingAdvanceFixtureCode;
             if (date && time) {
-                state.advanceFixtureSchedules[editingAdvanceFixtureCode] = { date, time };
+                state.advanceFixtureSchedules[scheduleCode] = { date, time };
+                if (editingAdvanceFixtureLegIndex === 0) {
+                    delete state.advanceFixtureSchedules[editingAdvanceFixtureCode];
+                }
             } else {
-                delete state.advanceFixtureSchedules[editingAdvanceFixtureCode];
+                delete state.advanceFixtureSchedules[scheduleCode];
+                if (editingAdvanceFixtureLegIndex === 0) {
+                    delete state.advanceFixtureSchedules[editingAdvanceFixtureCode];
+                }
             }
             renderSchedule();
             closeModal();
@@ -3353,16 +3538,37 @@ document.addEventListener('DOMContentLoaded', () => {
             const home = rows.get(game.home);
             const away = rows.get(game.away);
             if (!home || !away) return;
-            if (Number.isInteger(game.homeScore) && Number.isInteger(game.awayScore)) {
-                home.played += 1;
-                away.played += 1;
+            const played = game.homeAwayEnabled
+                ? game.legs.filter(leg =>
+                    Number.isInteger(leg.homeScore) && Number.isInteger(leg.awayScore)
+                ).length
+                : Number.isInteger(game.homeScore) && Number.isInteger(game.awayScore) ? 1 : 0;
+            home.played += played;
+            away.played += played;
+            if (game.homeAwayEnabled) {
+                game.legs.forEach((leg, index) => {
+                    if (!Number.isInteger(leg.homeScore) || !Number.isInteger(leg.awayScore)) return;
+                    const homeTeam = index === 0 ? home : away;
+                    const awayTeam = index === 0 ? away : home;
+                    const homeScore = index === 0 ? leg.homeScore : leg.awayScore;
+                    const awayScore = index === 0 ? leg.awayScore : leg.homeScore;
+                    if (homeScore > awayScore) {
+                        homeTeam.wins += 1;
+                        awayTeam.losses += 1;
+                    } else if (awayScore > homeScore) {
+                        awayTeam.wins += 1;
+                        homeTeam.losses += 1;
+                    }
+                });
             }
             if (!game.winner || !Number.isInteger(game.homeScore) || !Number.isInteger(game.awayScore)) return;
             const winner = rows.get(game.winner);
             const loser = rows.get(game.winner === game.home ? game.away : game.home);
             if (!winner || !loser) return;
-            winner.wins += 1;
-            loser.losses += 1;
+            if (!game.homeAwayEnabled) {
+                winner.wins += 1;
+                loser.losses += 1;
+            }
             if (game.thirdPlace) {
                 winner.place = 3;
                 winner.lastRound = roundCount;
@@ -3431,14 +3637,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const sortRules = state.scoring.ranking || ['points', 'diff', 'scored', 'wins'];
         const advanceBranches = state.advanceEnabled ? state.advanceBranches : [];
         const advanceFixtures = state.advanceEnabled ? buildAdvanceFixtures() : [];
-        const completedAdvanceMatches = advanceFixtures.filter(fixture =>
-            Number.isInteger(fixture.homeScore) &&
-            Number.isInteger(fixture.awayScore) &&
-            (fixture.format !== 'bracket' ||
-                fixture.homeScore !== fixture.awayScore ||
-                fixture.winner === fixture.home ||
-                fixture.winner === fixture.away)
-        );
+        const completedAdvanceMatches = advanceFixtures
+            .flatMap(advanceFixtureLegRows)
+            .filter(fixture =>
+                Number.isInteger(fixture.homeScore) &&
+                Number.isInteger(fixture.awayScore) &&
+                (fixture.format !== 'bracket' ||
+                    fixture.homeAwayEnabled ||
+                    fixture.homeScore !== fixture.awayScore ||
+                    fixture.winner === fixture.home ||
+                    fixture.winner === fixture.away)
+            );
         const completedMainBracketMatches = state.competitionType === 'bracket'
             ? state.bracketGames.filter(game =>
                 Number.isInteger(game.homeScore) &&
@@ -3801,6 +4010,7 @@ document.addEventListener('DOMContentLoaded', () => {
             state.advanceBranches = [{ start: 1, end: 2, format: 'bracket', thirdPlace: false }];
             state.advanceFixtureSchedules = {};
             state.advanceFixtureResults = {};
+            state.advanceFixtureRoundModes = {};
             state.bracketGames = [];
             state.thirdPlaceGame = null;
             state.contact = '';
@@ -3920,18 +4130,20 @@ document.addEventListener('DOMContentLoaded', () => {
             if (byes.length) lines.push(`Đội nghỉ: ${byes.join(' · ')}`);
         }
         if (state.advanceEnabled) {
-            lines.push('', `Vòng tiếp theo (${advanceFixtures.length} trận)`);
+            lines.push('', `Vòng tiếp theo (${advanceFixtureMatchCount(advanceFixtures)} trận)`);
             advanceFixtures.forEach(game => {
-                const schedule = game.date && game.time
-                    ? ` [${formatMatchDateTime(game.date, game.time)}]`
-                    : '';
-                const score = Number.isInteger(game.homeScore) && Number.isInteger(game.awayScore)
-                    ? ` (${game.homeScore}–${game.awayScore})`
-                    : '';
-                const winner = game.winner ? ` — Đi tiếp: ${game.winner}` : '';
-                lines.push(`Nhánh ${game.branchIndex + 1}, ${game.thirdPlace ? 'tranh hạng ba' : `vòng ${game.round}`}, ${game.code}: ${game.home} vs ${game.away}${score}${schedule}${winner}`);
+                advanceFixtureLegRows(game).forEach(leg => {
+                    const schedule = leg.date && leg.time
+                        ? ` [${formatMatchDateTime(leg.date, leg.time)}]`
+                        : '';
+                    const score = Number.isInteger(leg.homeScore) && Number.isInteger(leg.awayScore)
+                        ? ` (${leg.homeScore}–${leg.awayScore})`
+                        : '';
+                    const winner = game.winner ? ` — Đi tiếp: ${game.winner}` : '';
+                    lines.push(`Nhánh ${game.branchIndex + 1}, ${game.thirdPlace ? 'tranh hạng ba' : `vòng ${game.round}`}, ${leg.displayCode}: ${leg.home} vs ${leg.away}${score}${schedule}${winner}`);
+                });
             });
-            lines.push('', `Tổng số trận toàn giải: ${state.matches.length + advanceFixtures.length}`);
+            lines.push('', `Tổng số trận toàn giải: ${state.matches.length + advanceFixtureMatchCount(advanceFixtures)}`);
         }
         return lines.join('\n');
     }
