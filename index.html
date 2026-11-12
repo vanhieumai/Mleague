@@ -72,10 +72,13 @@
                                 <div class="bracket-radio-row bracket-consolation-options">
                                     <label><input type="radio" name="bracket-consolation" value="none" checked> <span>Không có</span></label>
                                     <label><input type="radio" name="bracket-consolation" value="full"> <span>Đầy đủ</span></label>
-                                    <label><input type="radio" name="bracket-consolation" value="third-place"> <span>Tranh hạng ba</span></label>
                                 </div>
                                 <p id="consolation-description" class="bracket-description">Chỉ tạo nhánh vô địch; đội thua bị loại.</p>
                             </div>
+                            <label class="bracket-third-place-toggle">
+                                <input id="bracket-third-place" name="bracket-third-place" type="checkbox">
+                                <span><strong>Tranh hạng ba</strong><small id="bracket-third-place-description">Hai đội thua ở bán kết thi đấu thêm một trận.</small></span>
+                            </label>
                             <div id="bracket-preview" class="bracket-preview" aria-live="polite"></div>
                         </div>
                         <div class="setup-row">

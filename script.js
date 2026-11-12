@@ -33,9 +33,10 @@ document.addEventListener('DOMContentLoaded', () => {
         competitionType: 'round-robin',
         bracketFormat: 'single',
         bracketConsolation: 'none',
+        bracketThirdPlaceEnabled: false,
         thirdPlaceGame: null,
         advanceEnabled: false,
-        advanceBranches: [{ start: 1, end: 4, format: 'bracket' }],
+        advanceBranches: [{ start: 1, end: 4, format: 'bracket', thirdPlace: false }],
         advanceFixtureSchedules: {},
         advanceFixtureResults: {},
         bracketGames: [],
@@ -373,9 +374,9 @@ document.addEventListener('DOMContentLoaded', () => {
         state.roundSchedules = data.roundSchedules || {};
         state.competitionType = data.competitionType === 'bracket' ? 'bracket' : 'round-robin';
         state.bracketFormat = data.bracketFormat === 'double' ? 'double' : 'single';
-        state.bracketConsolation = ['full', 'third-place'].includes(data.bracketConsolation)
-            ? data.bracketConsolation
-            : 'none';
+        state.bracketThirdPlaceEnabled = data.bracketThirdPlaceEnabled === true ||
+            data.bracketConsolation === 'third-place';
+        state.bracketConsolation = data.bracketConsolation === 'full' ? 'full' : 'none';
         state.bracketGames = state.competitionType === 'bracket' && validBracketGames(data.bracketGames, data.teams)
             ? data.bracketGames.map(game => ({ ...game }))
             : state.competitionType === 'bracket' ? buildBracketGames(data.teams) : [];
@@ -398,7 +399,9 @@ document.addEventListener('DOMContentLoaded', () => {
             .map(branch => ({
                 start: branch.start,
                 end: branch.end,
-                format: branch.format === 'round-robin' ? 'round-robin' : 'bracket'
+                format: branch.format === 'round-robin' ? 'round-robin' : 'bracket',
+                thirdPlace: branch.format !== 'round-robin' && branch.thirdPlace === true &&
+                    branch.end - branch.start + 1 >= 4
             }));
         state.advanceFixtureSchedules = data.advanceFixtureSchedules &&
             typeof data.advanceFixtureSchedules === 'object' && !Array.isArray(data.advanceFixtureSchedules)
@@ -415,7 +418,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 (result.winner === null || typeof result.winner === 'string')))
             : {};
         if (!state.advanceBranches.length) {
-            state.advanceBranches = [{ start: 1, end: Math.min(4, state.teams.length), format: 'bracket' }];
+            state.advanceBranches = [{ start: 1, end: Math.min(4, state.teams.length), format: 'bracket', thirdPlace: false }];
         }
         window.clearTimeout(autoSaveTimer);
         currentLeagueId = options.leagueId || null;
@@ -436,7 +439,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (input === teamCountInput) updateBracketSetup();
         });
     });
-    document.querySelectorAll('[name="competition-type"], [name="bracket-format"], [name="bracket-consolation"], [name="advance-enabled"]').forEach(input => {
+    document.querySelectorAll('[name="competition-type"], [name="bracket-format"], [name="bracket-consolation"], [name="bracket-third-place"], [name="advance-enabled"]').forEach(input => {
         input.addEventListener('change', updateBracketSetup);
     });
     teamCountInput.addEventListener('input', updateBracketSetup);
@@ -454,7 +457,8 @@ document.addEventListener('DOMContentLoaded', () => {
         state.advanceBranches = branches.concat({
             start: nextStart,
             end: Math.min(nextStart + 3, teamCount),
-            format: 'bracket'
+            format: 'bracket',
+            thirdPlace: false
         });
         renderAdvanceBranches();
     });
@@ -463,7 +467,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!removeButton) return;
         const branches = readAdvanceBranches();
         branches.splice(Number(removeButton.dataset.index), 1);
-        state.advanceBranches = branches.length ? branches : [{ start: 1, end: Math.min(2, Number(teamCountInput.value)), format: 'bracket' }];
+        state.advanceBranches = branches.length ? branches : [{ start: 1, end: Math.min(2, Number(teamCountInput.value)), format: 'bracket', thirdPlace: false }];
         renderAdvanceBranches();
     });
     renderAdvanceBranches();
@@ -473,7 +477,8 @@ document.addEventListener('DOMContentLoaded', () => {
         return [...document.querySelectorAll('.advance-branch')].map((branch, index) => ({
             start: Number(branch.querySelector(`[name="advance-start-${index}"]`).value),
             end: Number(branch.querySelector(`[name="advance-end-${index}"]`).value),
-            format: branch.querySelector(`[name="advance-format-${index}"]`).value
+            format: branch.querySelector(`[name="advance-format-${index}"]`).value,
+            thirdPlace: branch.querySelector(`[name="advance-third-place-${index}"]`).checked
         }));
     }
 
@@ -499,6 +504,11 @@ document.addEventListener('DOMContentLoaded', () => {
                             <option value="round-robin"${branch.format === 'round-robin' ? ' selected' : ''}>Vòng tròn</option>
                         </select>
                     </label>
+                    <label class="advance-third-place-toggle">
+                        <input name="advance-third-place-${index}" type="checkbox"${branch.thirdPlace ? ' checked' : ''}>
+                        <span>Tranh hạng ba</span>
+                        <small class="advance-third-place-help">Cần ít nhất 4 đội trong nhánh.</small>
+                    </label>
                 </div>
             </section>`).join('');
         updateAdvanceBranchActions();
@@ -511,6 +521,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const nextStart = branches.length ? Math.max(...branches.map(item => item.end)) + 1 : 1;
         addButton.disabled = !Number.isInteger(teamCount) || nextStart + 1 > teamCount ||
             branches.length >= Math.floor(teamCount / 2);
+        document.querySelectorAll('.advance-branch').forEach((branch, index) => {
+            const format = branch.querySelector(`[name="advance-format-${index}"]`).value;
+            const start = Number(branch.querySelector(`[name="advance-start-${index}"]`).value);
+            const end = Number(branch.querySelector(`[name="advance-end-${index}"]`).value);
+            const option = branch.querySelector('.advance-third-place-toggle');
+            const checkbox = branch.querySelector(`[name="advance-third-place-${index}"]`);
+            const eligible = format === 'bracket' && end - start + 1 >= 4;
+            option.classList.toggle('hidden', format !== 'bracket');
+            if (!eligible) checkbox.checked = false;
+            checkbox.disabled = !eligible || !new FormData(setupForm).has('advance-enabled');
+            option.querySelector('.advance-third-place-help').classList.toggle('hidden', end - start + 1 >= 4);
+        });
     }
 
     function updateBracketSetup(refreshBranches = true) {
@@ -534,7 +556,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return branches;
             }, []);
             if (!state.advanceBranches.length) {
-                state.advanceBranches = [{ start: 1, end: Math.min(4, teamCount), format: 'bracket' }];
+                state.advanceBranches = [{ start: 1, end: Math.min(4, teamCount), format: 'bracket', thirdPlace: false }];
             }
             renderAdvanceBranches();
         } else {
@@ -543,6 +565,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('#advance-branches input, #advance-branches select').forEach(input => {
             input.disabled = !advanceEnabled;
         });
+        updateAdvanceBranchActions();
         document.getElementById('add-advance-branch').disabled =
             !advanceEnabled || document.getElementById('add-advance-branch').disabled;
         const format = String(formData.get('bracket-format') || 'single');
@@ -550,16 +573,18 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('[name="bracket-consolation"]').forEach(input => {
             input.disabled = format === 'double';
         });
+        document.getElementById('bracket-third-place').disabled =
+            !Number.isInteger(teamCount) || teamCount < 4;
         const description = format === 'double'
-            ? 'Thể thức loại kép đã có nhánh thua; tùy chọn này chỉ áp dụng cho loại đơn.'
+            ? 'Thể thức loại kép đã có nhánh thua.'
             : ({
-            none: 'Chỉ tạo nhánh vô địch; đội thua bị loại.',
-            full: 'Đội thua tiếp tục ở nhánh phụ để xếp hạng; số vòng phụ sẽ tùy thuộc số đội.',
-            'third-place': teamCount >= 4
-                ? 'Hai đội thua ở bán kết thi đấu thêm một trận tranh hạng ba.'
-                : 'Cần ít nhất 4 đội để tổ chức trận tranh hạng ba.'
+                none: 'Chỉ tạo nhánh vô địch; đội thua bị loại.',
+                full: 'Đội thua tiếp tục ở nhánh phụ để xếp hạng; số vòng phụ sẽ tùy thuộc số đội.'
             }[consolation]);
         document.getElementById('consolation-description').textContent = description;
+        document.getElementById('bracket-third-place-description').textContent = teamCount >= 4
+            ? 'Hai đội thua ở bán kết thi đấu thêm một trận.'
+            : 'Cần ít nhất 4 đội để tổ chức trận tranh hạng ba.';
         const hint = document.getElementById('setup-hint');
         hint.textContent = isBracket
             ? 'Nhập kết quả ở từng trận; đội thắng sẽ tự chuyển vào vòng kế tiếp.'
@@ -579,7 +604,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 format,
                 format === 'double' ? 'none' : consolation,
                 true,
-                Array.from({ length: teamCount }, (_, index) => state.teams[index] || `Đội ${index + 1}`)
+                Array.from({ length: teamCount }, (_, index) => state.teams[index] || `Đội ${index + 1}`),
+                formData.has('bracket-third-place')
             )
             : '';
     }
@@ -593,7 +619,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return seeds;
     }
 
-    function bracketMarkup(teamCount, format, consolation, compact = false, teamNames = state.teams) {
+    function bracketMarkup(teamCount, format, consolation, compact = false, teamNames = state.teams, thirdPlace = false) {
         const bracketSize = 2 ** Math.ceil(Math.log2(Math.max(2, teamCount)));
         const roundCount = Math.ceil(Math.log2(bracketSize));
         const seedOrder = bracketSeedOrder(bracketSize);
@@ -643,8 +669,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     `<article class="bracket-match-card bracket-tbd"><span>Đội thua nhánh chính</span><span>Đội thắng nhánh phụ</span></article>`
                 ).join('')}</div>`;
             }).join('')}</div><p>Các đội thua được chuyển vào nhánh phụ để tiếp tục thi đấu.</p></section>`;
-        } else if (format === 'single' && consolation === 'third-place' && teamCount >= 4) {
-            lowerBracket = `<section class="bracket-lower-section third-place-preview"><h3>Tranh hạng ba</h3><article class="bracket-match-card bracket-tbd"><span>Đội thua bán kết 1</span><span>Đội thua bán kết 2</span></article></section>`;
+        }
+        if (thirdPlace && teamCount >= 4) {
+            lowerBracket += `<section class="bracket-lower-section third-place-preview"><h3>Tranh hạng ba</h3><article class="bracket-match-card bracket-tbd"><span>Đội thua bán kết 1</span><span>Đội thua bán kết 2</span></article></section>`;
         }
 
         return `<div class="bracket-preview-heading"><strong>${format === 'double' ? 'Loại kép' : 'Loại đơn'}</strong><span>${teamCount} đội · ${roundCount} vòng nhánh chính</span></div>
@@ -729,12 +756,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }).join('');
         const format = state.bracketFormat === 'double' ? 'Loại kép' : 'Loại đơn';
         let consolationPreview = '';
-        if (state.bracketFormat === 'single' && state.bracketConsolation === 'third-place' &&
-            state.teams.length >= 4) {
-            consolationPreview = `<div class="bracket-static-supplement"><section class="bracket-lower-section third-place-preview">
-                <h3>Tranh hạng ba</h3>${thirdPlaceMatchMarkup()}
-            </section></div>`;
-        } else if (state.bracketFormat === 'double' ||
+        if (state.bracketFormat === 'double' ||
             state.bracketConsolation === 'full') {
             const preview = document.createElement('template');
             preview.innerHTML = bracketMarkup(
@@ -746,6 +768,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (lowerBracket) {
                 consolationPreview = `<div class="bracket-static-supplement">${lowerBracket.outerHTML}<p class="bracket-preview-note">Các trận nhánh phụ hiện là sơ đồ tham khảo; nhập tỷ số ở nhánh chính.</p></div>`;
             }
+        }
+        if (state.bracketThirdPlaceEnabled && state.teams.length >= 4) {
+            consolationPreview += `<div class="bracket-static-supplement"><section class="bracket-lower-section third-place-preview">
+                <h3>Tranh hạng ba</h3>${thirdPlaceMatchMarkup()}
+            </section></div>`;
         }
         return `<div class="bracket-display-heading">
                 <div><h2 class="bracket-display-title">Sơ đồ nhánh đấu</h2><p>${format}${state.bracketFormat === 'double' ? ' · Nhánh thắng' : ''} · ${state.teams.length} đội · ${rounds} vòng</p></div>
@@ -885,9 +912,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (competitionType === 'round-robin') state.gamesPerTeam = games;
         state.competitionType = competitionType;
         state.bracketFormat = String(new FormData(setupForm).get('bracket-format') || 'single');
-        state.bracketConsolation = String(new FormData(setupForm).get('bracket-consolation') || 'none');
+        state.bracketConsolation = String(formData.get('bracket-consolation') || 'none');
+        state.bracketThirdPlaceEnabled = formData.has('bracket-third-place');
         state.advanceEnabled = advanceEnabled;
-        state.advanceBranches = advanceEnabled ? advanceBranches : [{ start: 1, end: Math.min(4, teamCount), format: 'bracket' }];
+        state.advanceBranches = advanceEnabled
+            ? advanceBranches
+            : [{ start: 1, end: Math.min(4, teamCount), format: 'bracket', thirdPlace: false }];
         state.rounds = competitionType === 'bracket'
             ? Math.ceil(Math.log2(teamCount))
             : rounds;
@@ -1385,11 +1415,12 @@ document.addEventListener('DOMContentLoaded', () => {
             fixture.branchIndex === branchIndex && fixture.round === round
         );
         if (branch.format === 'bracket' && round > 1) {
-            const previousRound = buildAdvanceFixtures().filter(fixture =>
-                fixture.branchIndex === branchIndex && fixture.round === round - 1
+            const branchFixtures = buildAdvanceFixtures().filter(fixture =>
+                fixture.branchIndex === branchIndex
             );
-            if (previousRound.some(game => !game.winner)) {
-                showToast(`Hãy hoàn thành vòng ${round - 1} của nhánh ${branchIndex + 1} trước.`);
+            const previousRound = getRequiredAdvanceRound(branch, round);
+            if (branchFixtures.some(game => game.round === previousRound && !game.winner)) {
+                showToast(`Hãy hoàn thành vòng ${previousRound} của nhánh ${branchIndex + 1} trước.`);
                 return;
             }
         }
@@ -1424,8 +1455,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!branch) return;
         const clearedRounds = new Set([round]);
         if (branch.format === 'bracket') {
+            const finalRound = Math.ceil(Math.log2(branch.end - branch.start + 1));
             buildAdvanceFixtures()
-                .filter(fixture => fixture.branchIndex === branchIndex && fixture.round > round)
+                .filter(fixture => fixture.branchIndex === branchIndex &&
+                    fixture.round > round && !(fixture.thirdPlace && round === finalRound))
                 .forEach(fixture => clearedRounds.add(fixture.round));
         }
         let cleared = 0;
@@ -1470,6 +1503,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setupForm.querySelector(`[name="competition-type"][value="${state.competitionType}"]`).checked = true;
         setupForm.querySelector(`[name="bracket-format"][value="${state.bracketFormat}"]`).checked = true;
         setupForm.querySelector(`[name="bracket-consolation"][value="${state.bracketConsolation}"]`).checked = true;
+        setupForm.querySelector('[name="bracket-third-place"]').checked = state.bracketThirdPlaceEnabled;
         document.getElementById('advance-enabled').checked = state.advanceEnabled;
         teamCountInput.value = state.teams.length;
         renderAdvanceBranches();
@@ -1652,8 +1686,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
         });
-        const thirdPlaceEnabled = state.bracketFormat === 'single' &&
-            state.bracketConsolation === 'third-place' && state.teams.length >= 4;
+        const thirdPlaceEnabled = state.bracketThirdPlaceEnabled && state.teams.length >= 4;
         if (!thirdPlaceEnabled) {
             state.thirdPlaceGame = createEmptyBracketGame();
             return;
@@ -1959,8 +1992,58 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 slots = nextSlots;
             }
+            if (branch.thirdPlace) {
+                const semifinals = fixtures
+                    .filter(fixture => fixture.branchIndex === branchIndex && fixture.round === rounds - 1)
+                    .sort((first, second) => first.position - second.position);
+                if (semifinals.length === 2) {
+                    const home = semifinals[0].winner
+                        ? (semifinals[0].winner === semifinals[0].home ? semifinals[0].away : semifinals[0].home)
+                        : `Thua ${semifinals[0].code}`;
+                    const away = semifinals[1].winner
+                        ? (semifinals[1].winner === semifinals[1].home ? semifinals[1].away : semifinals[1].home)
+                        : `Thua ${semifinals[1].code}`;
+                    const round = rounds + 1;
+                    const position = 0;
+                    const code = `N${branchIndex + 1}-V${round}-M01`;
+                    const schedule = state.advanceFixtureSchedules[code] || { date: '', time: '' };
+                    const savedResult = state.advanceFixtureResults[code];
+                    const sameTeams = savedResult &&
+                        savedResult.home === home &&
+                        savedResult.away === away;
+                    const homeScore = sameTeams ? savedResult.homeScore : null;
+                    const awayScore = sameTeams ? savedResult.awayScore : null;
+                    const winner = sameTeams && Number.isInteger(homeScore) && Number.isInteger(awayScore)
+                        ? homeScore > awayScore ? home
+                            : awayScore > homeScore ? away
+                                : [home, away].includes(savedResult.winner)
+                                    ? savedResult.winner
+                                    : null
+                        : null;
+                    fixtures.push({
+                        branchIndex,
+                        format: branch.format,
+                        round,
+                        position,
+                        code,
+                        home,
+                        away,
+                        date: schedule.date,
+                        time: schedule.time,
+                        homeScore,
+                        awayScore,
+                        winner,
+                        thirdPlace: true
+                    });
+                }
+            }
         });
         return fixtures;
+    }
+
+    function getRequiredAdvanceRound(branch, round) {
+        const finalRound = Math.ceil(Math.log2(branch.end - branch.start + 1));
+        return branch.thirdPlace && round === finalRound + 1 ? finalRound - 1 : round - 1;
     }
 
     function advanceFixturesMarkup(fixtures) {
@@ -1976,10 +2059,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 games.sort(compareAdvanceFixtures);
                 const pendingGames = games.filter(game =>
                     !(Number.isInteger(game.homeScore) && Number.isInteger(game.awayScore))).length;
+                const previousRound = branch.format === 'bracket'
+                    ? getRequiredAdvanceRound(branch, round)
+                    : round - 1;
                 const previousRoundComplete = branch.format !== 'bracket' || round === 1 ||
-                    branchFixtures
-                        .filter(game => game.round === round - 1)
-                        .every(game => game.winner);
+                    branchFixtures.filter(game => game.round === previousRound).every(game => game.winner);
                 const canRandomize = primaryRoundRobinComplete() && pendingGames > 0 && previousRoundComplete;
                 const randomGames = games.filter(game => {
                     const result = state.advanceFixtureResults[game.code];
@@ -1988,8 +2072,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 const formatTitle = branch.format === 'bracket' ? 'Loại trực tiếp' : 'Vòng tròn';
                 sections.push(`<section class="round-section advance-round-section">
                     <div class="round-heading">
-                        <h2>Nhánh ${branchIndex + 1} · ${formatTitle} · ${branch.format === 'bracket' &&
-                            round === Math.ceil(Math.log2(branch.end - branch.start + 1)) ? 'Chung kết' : `Vòng ${round}`}</h2>
+                        <h2>Nhánh ${branchIndex + 1} · ${formatTitle} · ${games.some(game => game.thirdPlace)
+                            ? 'Tranh hạng ba'
+                            : branch.format === 'bracket' &&
+                                round === Math.ceil(Math.log2(branch.end - branch.start + 1))
+                                ? 'Chung kết'
+                                : `Vòng ${round}`}</h2>
                         <div class="round-heading-actions">
                             ${readOnlyView ? '' : `<button class="random-round-button" type="button"
                                 data-random-advance-branch="${branchIndex}" data-random-advance-round="${round}"
@@ -2022,7 +2110,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function advanceFixtureRow(game) {
-        const title = game.format === 'bracket'
+        const title = game.thirdPlace ? 'Tranh hạng ba' : game.format === 'bracket'
             ? (game.round === Math.ceil(Math.log2(
                 state.advanceBranches[game.branchIndex].end - state.advanceBranches[game.branchIndex].start + 1
             )) ? 'Chung kết' : `Vòng ${game.round}`)
@@ -2155,7 +2243,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         ...fixture,
                         phaseOrder: fixture.branchIndex + 2,
                         phase: `Nhánh ${fixture.branchIndex + 1} · ${branch.format === 'bracket' ? 'Loại trực tiếp' : 'Vòng tròn'}`,
-                        title: branch.format === 'bracket' &&
+                        title: fixture.thirdPlace
+                            ? 'Tranh hạng ba'
+                            : branch.format === 'bracket' &&
                             fixture.round === Math.ceil(Math.log2(branch.end - branch.start + 1))
                             ? 'Chung kết'
                             : `Vòng ${fixture.round}`,
@@ -2743,10 +2833,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 const start = Math.max(branch.start, lastQualifiedRank + 1);
                 const end = Math.min(branch.end, teams.length);
                 lastQualifiedRank = end;
-                return { ...branch, start, end };
+                return {
+                    ...branch,
+                    start,
+                    end,
+                    thirdPlace: branch.thirdPlace && branch.format === 'bracket' && end - start + 1 >= 4
+                };
             }).filter(branch => branch.end - branch.start >= 1);
             if (!state.advanceBranches.length) {
-                state.advanceBranches = [{ start: 1, end: Math.min(4, teams.length), format: 'bracket' }];
+                state.advanceBranches = [{ start: 1, end: Math.min(4, teams.length), format: 'bracket', thirdPlace: false }];
             }
             state.teamColors = nextColors;
             state.teamColorMode = String(formData.get('team-color-mode') || state.teamColorMode);
@@ -3005,7 +3100,8 @@ document.addEventListener('DOMContentLoaded', () => {
             played: 0,
             wins: 0,
             losses: 0,
-            lastRound: null
+            lastRound: null,
+            stoppedAt: null
         }]));
 
         games.forEach(game => {
@@ -3022,6 +3118,15 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!winner || !loser) return;
             winner.wins += 1;
             loser.losses += 1;
+            if (game.thirdPlace) {
+                winner.place = 3;
+                winner.lastRound = roundCount;
+                winner.stoppedAt = 'Tranh hạng ba';
+                loser.place = 4;
+                loser.lastRound = roundCount;
+                loser.stoppedAt = 'Tranh hạng ba';
+                return;
+            }
             const isFinal = game.round === roundCount;
             loser.place = isFinal ? 2 : (2 ** (roundCount - game.round)) + 1;
             loser.lastRound = game.round;
@@ -3045,11 +3150,11 @@ document.addEventListener('DOMContentLoaded', () => {
             else if (row.place === 2) placement = 'Á quân';
             else if (row.place !== null && placeCounts.get(row.place) > 1) placement = `Đồng hạng ${row.place}`;
             else if (row.place !== null) placement = `Hạng ${row.place}`;
-            const stoppedAt = row.lastRound === null
+            const stoppedAt = row.stoppedAt || (row.lastRound === null
                 ? (row.played ? 'Đang thi đấu' : 'Chưa thi đấu')
                 : row.lastRound === roundCount
                     ? 'Chung kết'
-                    : `Vòng ${row.lastRound}`;
+                    : `Vòng ${row.lastRound}`);
             return { ...row, placement, stoppedAt };
         });
     }
@@ -3098,9 +3203,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     game.winner === game.away)
             )
             : [];
+        const completedThirdPlaceMatch = state.competitionType === 'bracket' &&
+            state.thirdPlaceGame && state.thirdPlaceGame.home && state.thirdPlaceGame.away &&
+            Number.isInteger(state.thirdPlaceGame.homeScore) &&
+            Number.isInteger(state.thirdPlaceGame.awayScore) &&
+            (state.thirdPlaceGame.homeScore !== state.thirdPlaceGame.awayScore ||
+                state.thirdPlaceGame.winner === state.thirdPlaceGame.home ||
+                state.thirdPlaceGame.winner === state.thirdPlaceGame.away);
         const totalCompletedMatches = completedMatches.length +
             completedAdvanceMatches.length +
-            completedMainBracketMatches.length;
+            completedMainBracketMatches.length +
+            Number(Boolean(completedThirdPlaceMatch));
         const roundRobinBranches = advanceBranches
             .map((branch, branchIndex) => ({ ...branch, branchIndex }))
             .filter(branch => branch.format === 'round-robin');
@@ -3190,7 +3303,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 'Bảng xếp hạng · Loại trực tiếp',
                 `${state.teams.length} đội`,
                 state.teams,
-                state.bracketGames
+                state.thirdPlaceGame && state.thirdPlaceGame.home && state.thirdPlaceGame.away
+                    ? state.bracketGames.concat({
+                        ...state.thirdPlaceGame,
+                        round: Math.ceil(Math.log2(state.teams.length)),
+                        position: 0,
+                        thirdPlace: true
+                    })
+                    : state.bracketGames
             )
             : '';
 
@@ -3203,7 +3323,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <span>${totalCompletedMatches} trận có kết quả</span>
             </div>
             ${advanceBranches.length ? `<div class="qualification-note">${advanceBranches.map((branch, index) =>
-                `<p><strong>Nhánh ${index + 1}:</strong> hạng ${branch.start}–${branch.end} · ${branch.format === 'bracket' ? 'Loại trực tiếp' : 'Vòng tròn'}</p>`
+                `<p><strong>Nhánh ${index + 1}:</strong> hạng ${branch.start}–${branch.end} · ${branch.format === 'bracket' ? 'Loại trực tiếp' : 'Vòng tròn'}${branch.thirdPlace ? ' · Tranh hạng ba' : ''}</p>`
             ).join('')}</div>` : ''}
             ${table}
             ${branchTables}
@@ -3430,8 +3550,9 @@ document.addEventListener('DOMContentLoaded', () => {
             state.competitionType = 'round-robin';
             state.bracketFormat = 'single';
             state.bracketConsolation = 'none';
+            state.bracketThirdPlaceEnabled = false;
             state.advanceEnabled = false;
-            state.advanceBranches = [{ start: 1, end: 2, format: 'bracket' }];
+            state.advanceBranches = [{ start: 1, end: 2, format: 'bracket', thirdPlace: false }];
             state.advanceFixtureSchedules = {};
             state.advanceFixtureResults = {};
             state.bracketGames = [];
@@ -3472,10 +3593,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 `Thể thức: ${state.bracketFormat === 'double' ? 'Loại kép' : 'Loại đơn'}`,
                 `Nhánh phụ: ${state.bracketFormat === 'double' ? 'Nhánh thua' : ({
                     none: 'Không có',
-                    full: 'Consolation đầy đủ',
-                    'third-place': 'Tranh hạng ba'
+                    full: 'Consolation đầy đủ'
                 })[state.bracketConsolation]}`
             );
+            lines.push(`Tranh hạng ba: ${state.bracketThirdPlaceEnabled ? 'Có' : 'Không'}`);
             state.bracketGames.forEach(game => {
                 const home = game.home || `Chờ vòng ${game.round - 1}`;
                 const away = game.away || (game.round === 1 ? 'BYE' : `Chờ vòng ${game.round - 1}`);
@@ -3507,7 +3628,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (state.advanceEnabled) {
             state.advanceBranches.forEach((branch, index) => {
-                lines.push(`Nhánh ${index + 1}: Hạng ${branch.start}–${branch.end} — ${branch.format === 'bracket' ? 'Loại trực tiếp' : 'Vòng tròn'}.`);
+                lines.push(`Nhánh ${index + 1}: Hạng ${branch.start}–${branch.end} — ${branch.format === 'bracket' ? 'Loại trực tiếp' : 'Vòng tròn'}${branch.thirdPlace ? ' · Có tranh hạng ba' : ''}.`);
             });
         }
         const advanceFixtures = state.advanceEnabled ? buildAdvanceFixtures() : [];
@@ -3542,7 +3663,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     ? ` (${game.homeScore}–${game.awayScore})`
                     : '';
                 const winner = game.winner ? ` — Đi tiếp: ${game.winner}` : '';
-                lines.push(`Nhánh ${game.branchIndex + 1}, vòng ${game.round}, ${game.code}: ${game.home} vs ${game.away}${score}${schedule}${winner}`);
+                lines.push(`Nhánh ${game.branchIndex + 1}, ${game.thirdPlace ? 'tranh hạng ba' : `vòng ${game.round}`}, ${game.code}: ${game.home} vs ${game.away}${score}${schedule}${winner}`);
             });
             lines.push('', `Tổng số trận toàn giải: ${state.matches.length + advanceFixtures.length}`);
         }

@@ -104,6 +104,10 @@ main { flex: 1; }
 .advance-branch { display: grid; gap: 9px; padding: 11px; border: 1px solid #e2e8e3; border-radius: 8px; background: #fff; }
 .advance-branch-heading { display: flex; align-items: center; justify-content: space-between; color: #424a50; font-size: 11px; }
 .advance-branch-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.advance-third-place-toggle { grid-column: 1 / -1; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 4px 7px; color: #4a5056; font-size: 11px; cursor: pointer; }
+.advance-third-place-toggle input { margin: 0; accent-color: var(--green); }
+.advance-third-place-toggle small { grid-column: 2; color: #838b91; font-size: 9px; }
+.advance-third-place-toggle input:disabled + span { color: #a0a5a9; }
 .advance-field { display: grid; align-content: start; gap: 6px; color: #4a5056; font-size: 11px; font-weight: 600; }
 .advance-field select,
 .advance-field input { width: 100%; min-width: 0; min-height: 36px; padding: 7px 9px; border: 1px solid #e2e5e6; border-radius: 7px; color: #424a50; background: #fff; font: inherit; }
@@ -124,6 +128,11 @@ main { flex: 1; }
 .bracket-radio-row label:has(input:checked) { border-color: #83bd89; color: #347d3e; background: #f2f9f2; }
 .bracket-radio-row input:disabled + span { color: #a0a5a9; }
 .bracket-description { margin: 0; color: #81898e; font-size: 10px; }
+.bracket-third-place-toggle { display: flex; align-items: flex-start; gap: 8px; color: #4a5056; cursor: pointer; }
+.bracket-third-place-toggle > input { margin-top: 3px; accent-color: var(--green); }
+.bracket-third-place-toggle > span { display: grid; gap: 3px; }
+.bracket-third-place-toggle strong { font-size: 12px; }
+.bracket-third-place-toggle small { color: #838b91; font-size: 10px; line-height: 1.4; }
 .bracket-preview { min-width: 0; padding: 12px; border: 1px solid #e8ebea; border-radius: 10px; background: #fafbfa; }
 .bracket-preview-heading { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 10px; color: #424a50; font-size: 11px; }
 .bracket-preview-heading span { color: #858d92; font-size: 10px; }
