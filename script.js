@@ -1162,7 +1162,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const affectedRounds = new Set([round]);
         const branch = state.advanceBranches[branchIndex];
         if (branch) {
-            const finalRound = Math.ceil(Math.log2(branch.end - branch.start + 1));
+            const finalRound = getAdvanceBranchTotalRounds(branch);
             buildAdvanceFixtures()
                 .filter(fixture => fixture.branchIndex === branchIndex &&
                     fixture.round > round && !(fixture.thirdPlace && round === finalRound))
@@ -1667,7 +1667,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!branch) return;
         const clearedRounds = new Set([round]);
         if (branch.format === 'bracket') {
-            const finalRound = Math.ceil(Math.log2(branch.end - branch.start + 1));
+            const finalRound = getAdvanceBranchTotalRounds(branch);
             buildAdvanceFixtures()
                 .filter(fixture => fixture.branchIndex === branchIndex &&
                     fixture.round > round && !(fixture.thirdPlace && round === finalRound))
@@ -2189,6 +2189,13 @@ document.addEventListener('DOMContentLoaded', () => {
         return `Vòng ${round}`;
     }
 
+    // Tính tổng số vòng loại trực tiếp của một nhánh advance
+    // Phải nhân số bảng (groupCount) vì mỗi bảng đóng góp (end - start + 1) đội
+    function getAdvanceBranchTotalRounds(branch) {
+        const participantCount = state.groupCount * (branch.end - branch.start + 1);
+        return Math.ceil(Math.log2(Math.max(2, participantCount)));
+    }
+
     function renderSchedule() {
         if (activeTeamName && !state.teams.includes(activeTeamName)) activeTeamName = '';
         scheduleView.classList.toggle('team-page-active', Boolean(activeTeamName));
@@ -2517,7 +2524,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getRequiredAdvanceRound(branch, round) {
-        const finalRound = Math.ceil(Math.log2(branch.end - branch.start + 1));
+        const finalRound = getAdvanceBranchTotalRounds(branch);
         return branch.thirdPlace && round === finalRound + 1 ? finalRound - 1 : round - 1;
     }
 
@@ -2551,7 +2558,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <h2>Nhánh ${branchIndex + 1} · ${formatTitle} · ${games.some(game => game.thirdPlace)
                             ? 'Tranh hạng ba'
                             : branch.format === 'bracket'
-                                ? getBracketRoundName(round, Math.ceil(Math.log2(branch.end - branch.start + 1)))
+                                ? getBracketRoundName(round, getAdvanceBranchTotalRounds(branch))
                                 : `Vòng ${round}`}</h2>
                         <div class="round-heading-actions">
                             ${branch.format === 'bracket' && !readOnlyView && games.length
@@ -2593,10 +2600,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function advanceFixtureRow(game) {
+        const branch = state.advanceBranches[game.branchIndex];
         const title = game.thirdPlace ? 'Tranh hạng ba' : game.format === 'bracket'
-            ? getBracketRoundName(game.round, Math.ceil(Math.log2(
-                state.advanceBranches[game.branchIndex].end - state.advanceBranches[game.branchIndex].start + 1
-            )))
+            ? getBracketRoundName(game.round, getAdvanceBranchTotalRounds(branch))
             : `Vòng ${game.round}`;
         const schedule = formatMatchDateTime(game.date, game.time);
         const isEditable = game.format === 'bracket' && !readOnlyView;
@@ -2752,7 +2758,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         title: `${fixture.thirdPlace
                             ? 'Tranh hạng ba'
                             : branch.format === 'bracket'
-                            ? getBracketRoundName(fixture.round, Math.ceil(Math.log2(branch.end - branch.start + 1)))
+                            ? getBracketRoundName(fixture.round, getAdvanceBranchTotalRounds(branch))
                             : `Vòng ${fixture.round}`}${fixture.homeAwayEnabled
                                 ? ` · ${fixture.legIndex === 0 ? 'Lượt đi' : 'Lượt về'}`
                                 : ''}`,
@@ -4413,7 +4419,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         ? ` (${leg.homeScore}–${leg.awayScore})`
                         : '';
                     const winner = game.winner ? ` — Đi tiếp: ${game.winner}` : '';
-                    lines.push(`Nhánh ${game.branchIndex + 1}, ${game.thirdPlace ? 'tranh hạng ba' : `vòng ${game.round}`}, ${leg.displayCode}: ${leg.home} vs ${leg.away}${score}${schedule}${winner}`);
+                    const roundLabel = game.thirdPlace
+                        ? 'tranh hạng ba'
+                        : branch.format === 'bracket'
+                        ? getBracketRoundName(game.round, getAdvanceBranchTotalRounds(branch)).toLowerCase()
+                        : `vòng ${game.round}`;
+                    lines.push(`Nhánh ${game.branchIndex + 1}, ${roundLabel}, ${leg.displayCode}: ${leg.home} vs ${leg.away}${score}${schedule}${winner}`);
                 });
             });
             lines.push('', `Tổng số trận toàn giải: ${state.matches.length + advanceFixtureMatchCount(advanceFixtures)}`);
