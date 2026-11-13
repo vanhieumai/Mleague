@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#ffffff">
+    <title>MLeague — Tạo lịch thi đấu</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css?v=mobile-menu-fixed">
+</head>
+<body>
+    <div class="app-shell">
+        <header class="site-header">
+            <a class="brand" href="#" aria-label="MLeague trang chủ" id="home-link">
+                <span class="brand-mark"><i class="fa-solid fa-trophy"></i></span>
+                <span class="brand-name">M<span>League</span></span>
+            </a>
+            <nav class="header-nav" aria-label="Điều hướng chính">
+                <a href="#" id="my-schedules">LỊCH CỦA TÔI</a>
+                <a href="#" id="account-profile-button">ĐĂNG NHẬP</a>
+                <a href="#" id="sign-out" class="hidden">ĐĂNG XUẤT</a>
+            </nav>
+        </header>
+
+        <main>
+            <section id="setup-view" class="setup-view">
+                <div class="page-heading">
+                    <span class="eyebrow">MLeague Schedule Maker</span>
+                    <h1>Tạo lịch thi đấu</h1>
+                    <p>Thiết lập giải đấu của bạn — MLeague sẽ lo phần lịch thi đấu.</p>
+                </div>
+
+                <form id="setup-form" class="setup-card">
+                    <div class="setup-fields">
+                        <fieldset class="competition-type-field">
+                            <legend>Hình thức thi đấu</legend>
+                            <div class="competition-type-options">
+                                <label class="competition-type-option">
+                                    <input type="radio" name="competition-type" value="round-robin" checked>
+                                    <span><i class="fa-solid fa-arrows-rotate"></i><strong>Vòng tròn</strong><small>Các đội lần lượt thi đấu theo lịch vòng.</small></span>
+                                </label>
+                                <label class="competition-type-option">
+                                    <input type="radio" name="competition-type" value="bracket">
+                                    <span><i class="fa-solid fa-diagram-project"></i><strong>Loại trực tiếp</strong><small>Tạo nhánh loại trực tiếp theo thể thức bạn chọn.</small></span>
+                                </label>
+                            </div>
+                        </fieldset>
+                        <label class="home-away-toggle">
+                            <input id="home-away-enabled" name="home-away-enabled" type="checkbox">
+                            <span><strong>Thi đấu lượt đi, lượt về</strong><small id="home-away-description">Vòng tròn: mỗi cặp gặp nhau hai trận, đổi sân. Loại trực tiếp: tính tổng tỉ số sau hai lượt.</small></span>
+                        </label>
+                        <div class="setup-row group-count-row" id="groups-setup-row">
+                            <span class="field-icon"><i class="fa-solid fa-layer-group"></i></span>
+                            <div class="field-copy">
+                                <label for="group-count">Số bảng đấu</label>
+                                <small>Đội được chia đều vào các bảng.</small>
+                            </div>
+                            <div class="stepper">
+                                <button type="button" class="step-button" data-target="group-count" data-step="-1" aria-label="Giảm số bảng"><i class="fa-solid fa-minus"></i></button>
+                                <input id="group-count" type="number" min="1" max="25" step="1" value="1" required>
+                                <button type="button" class="step-button" data-target="group-count" data-step="1" aria-label="Tăng số bảng"><i class="fa-solid fa-plus"></i></button>
+                            </div>
+                        </div>
+                        <div id="round-robin-advanced" class="round-robin-advanced hidden">
+                            <label class="advanced-combination-toggle">
+                                <input id="advance-enabled" name="advance-enabled" type="checkbox">
+                                <span><strong>Kết hợp nâng cao</strong><small id="advance-description">Lấy các đội đứng đầu bảng xếp hạng vòng tròn vào vòng tiếp theo.</small></span>
+                            </label>
+                            <div id="advance-options" class="advance-options hidden">
+                                <div id="advance-branches" class="advance-branches"></div>
+                                <button id="add-advance-branch" class="button button-outline add-advance-branch" type="button"><i class="fa-solid fa-plus"></i> Thêm nhánh</button>
+                                <p id="advance-help" class="advance-help">Đội được lấy theo thứ hạng hiện tại; mỗi đội chỉ thuộc một nhánh.</p>
+                            </div>
+                        </div>
+                        <div id="bracket-options" class="bracket-options hidden">
+                            <div class="bracket-choice-group">
+                                <span class="bracket-choice-title">Kiểu nhánh đấu</span>
+                                <div class="bracket-radio-row">
+                                    <label><input type="radio" name="bracket-format" value="single" checked> <span>Loại đơn</span></label>
+                                    <label><input type="radio" name="bracket-format" value="double"> <span>Loại kép</span></label>
+                                </div>
+                            </div>
+                            <div class="bracket-choice-group">
+                                <span class="bracket-choice-title">Nhánh phụ (consolation)</span>
+                                <div class="bracket-radio-row bracket-consolation-options">
+                                    <label><input type="radio" name="bracket-consolation" value="none" checked> <span>Không có</span></label>
+                                    <label><input type="radio" name="bracket-consolation" value="full"> <span>Đầy đủ</span></label>
+                                </div>
+                                <p id="consolation-description" class="bracket-description">Chỉ tạo nhánh vô địch; đội thua bị loại.</p>
+                            </div>
+                            <label class="bracket-third-place-toggle">
+                                <input id="bracket-third-place" name="bracket-third-place" type="checkbox">
+                                <span><strong>Tranh hạng ba</strong><small id="bracket-third-place-description">Hai đội thua ở bán kết thi đấu thêm một trận.</small></span>
+                            </label>
+                            <div id="bracket-preview" class="bracket-preview" aria-live="polite"></div>
+                        </div>
+                        <div class="setup-row">
+                            <span class="field-icon"><i class="fa-solid fa-people-group"></i></span>
+                            <div class="field-copy">
+                                <label for="team-count">Số lượng đội</label>
+                                <small>Từ 2 đến 50 đội.</small>
+                            </div>
+                            <div class="stepper">
+                                <button type="button" class="step-button" data-target="team-count" data-step="-1" aria-label="Giảm số đội"><i class="fa-solid fa-minus"></i></button>
+                                <input id="team-count" type="number" min="2" max="50" value="11" required>
+                                <button type="button" class="step-button" data-target="team-count" data-step="1" aria-label="Tăng số đội"><i class="fa-solid fa-plus"></i></button>
+                            </div>
+                        </div>
+                        <div class="setup-row" id="games-setup-row">
+                            <span class="field-icon"><i class="fa-solid fa-futbol"></i></span>
+                            <div class="field-copy">
+                                <label for="games-per-team">Số trận mỗi đội</label>
+                                <small id="games-per-team-help">Tổng số trận mỗi đội chơi trong mùa giải.</small>
+                            </div>
+                            <div class="stepper">
+                                <button type="button" class="step-button" data-target="games-per-team" data-step="-1" aria-label="Giảm số trận"><i class="fa-solid fa-minus"></i></button>
+                                <input id="games-per-team" type="number" min="1" max="50" value="4" required>
+                                <button type="button" class="step-button" data-target="games-per-team" data-step="1" aria-label="Tăng số trận"><i class="fa-solid fa-plus"></i></button>
+                            </div>
+                        </div>
+                        <div class="setup-row" id="rounds-setup-row">
+                            <span class="field-icon"><i class="fa-regular fa-calendar-days"></i></span>
+                            <div class="field-copy">
+                                <label for="week-count">Số tuần / vòng</label>
+                                <small>Các tuần không có trận có thể để trống.</small>
+                            </div>
+                            <div class="stepper">
+                                <button type="button" class="step-button" data-target="week-count" data-step="-1" aria-label="Giảm số tuần"><i class="fa-solid fa-minus"></i></button>
+                                <input id="week-count" type="number" min="1" max="50" value="5" required>
+                                <button type="button" class="step-button" data-target="week-count" data-step="1" aria-label="Tăng số tuần"><i class="fa-solid fa-plus"></i></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <p class="schedule-hint" id="setup-hint">MLeague sẽ phân bổ đều số trận và lượt nghỉ giữa các đội.</p>
+                    <div class="tip-box">
+                        <strong><i class="fa-regular fa-lightbulb"></i> Mẹo để lịch cân bằng</strong>
+                        <p id="round-robin-tip">Trong mỗi bảng, các đội chỉ có thể gặp một đối thủ một lần ở vòng tròn một lượt. Bạn có thể thay đổi đội và lịch sau khi tạo.</p>
+                    </div>
+
+                    <div class="setup-footer">
+                        <span><i class="fa-solid fa-wrench"></i> Bạn có thể thay đổi thiết lập sau.</span>
+                        <button id="create-schedule-button" class="button button-primary" type="submit">Tiếp tục tạo lịch <i class="fa-solid fa-arrow-right"></i></button>
+                    </div>
+                </form>
+            </section>
+
+            <section id="schedule-view" class="schedule-view hidden" aria-live="polite">
+                <div class="league-heading">
+                    <div class="league-title">
+                        <h1 id="league-title">Giải đấu mới</h1>
+                        <span id="season-title">Mùa giải mới</span>
+                        <span id="draft-badge" class="draft-badge hidden">BẢN NHÁP</span>
+                        <span id="readonly-badge" class="readonly-badge hidden">CHỈ XEM</span>
+                    </div>
+                    <div class="schedule-tabs">
+                        <button class="schedule-tab active" type="button"><i class="fa-solid fa-calendar-check"></i> Trình tạo lịch</button>
+                        <button class="schedule-tab" type="button" id="schedule-tab-button"><i class="fa-solid fa-list"></i> Lịch thi đấu</button>
+                        <button class="schedule-tab hidden" type="button" id="shared-standings-button"><i class="fa-solid fa-ranking-star"></i> Bảng xếp hạng</button>
+                        <button class="schedule-tab" type="button" id="share-button"><i class="fa-solid fa-share-nodes"></i> Chia sẻ</button>
+                    </div>
+                </div>
+
+                <div id="welcome-banner" class="welcome-banner">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i>
+                    <span>Chào mừng đến với MLeague! Thêm ngày, giờ và địa điểm thi đấu sau khi tạo lịch.</span>
+                    <button id="dismiss-banner" type="button" aria-label="Đóng thông báo"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+
+                <div class="schedule-toolbar">
+                    <label class="team-filter"><i class="fa-solid fa-people-group"></i>
+                        <select id="team-filter" aria-label="Lọc theo đội"><option value="">Tất cả các đội</option></select>
+                        <i class="fa-solid fa-chevron-down select-chevron"></i>
+                    </label>
+                    <div class="view-actions">
+                        <button class="round-icon-button" id="copy-button" type="button" title="Sao chép lịch" aria-label="Sao chép lịch"><i class="fa-regular fa-copy"></i></button>
+                        <button class="round-icon-button" id="print-button" type="button" title="In lịch" aria-label="In lịch"><i class="fa-solid fa-print"></i></button>
+                    </div>
+                </div>
+
+                <div class="schedule-layout">
+                    <div id="match-list" class="match-list"></div>
+                    <aside class="side-panel">
+                        <button class="side-panel-toggle" id="side-panel-toggle" type="button" aria-label="Thu gọn menu" aria-expanded="true" title="Thu gọn menu">
+                            <i class="fa-solid fa-chevron-right"></i>
+                        </button>
+                        <button class="button button-dark" id="edit-schedule-button" type="button">Chỉnh sửa lịch <i class="fa-solid fa-circle-question"></i></button>
+                        <button class="button button-primary" id="save-league-button" type="button"><i class="fa-regular fa-floppy-disk"></i> Lưu giải đấu</button>
+                        <button class="button button-primary" id="settings-button" type="button"><i class="fa-solid fa-sliders"></i> Cài đặt</button>
+                        <button class="button button-outline" id="teams-button" type="button"><i class="fa-solid fa-people-group"></i> Các đội</button>
+                        <button class="button button-outline" id="rounds-button" type="button"><i class="fa-regular fa-calendar-days"></i> Số vòng</button>
+                        <div class="side-divider"></div>
+                        <button class="button button-outline" id="add-game-button" type="button"><i class="fa-solid fa-plus"></i> Thêm trận đấu</button>
+                        <button class="button button-outline" id="standings-button" type="button"><i class="fa-solid fa-ranking-star"></i> Bảng xếp hạng</button>
+                        <button class="button button-outline" id="checker-button" type="button"><i class="fa-solid fa-circle-check"></i> Kiểm tra lịch</button>
+                        <button class="button button-outline" id="regenerate-button" type="button"><i class="fa-solid fa-arrows-rotate"></i> Tạo lại lịch</button>
+                        <button class="button button-outline" id="back-button" type="button"><i class="fa-solid fa-arrow-left"></i> Thiết lập ban đầu</button>
+                        <div class="side-divider"></div>
+                        <p class="side-note"><i class="fa-solid fa-circle-info"></i> Nhấn vào trận đấu để chỉnh sửa thông tin.</p>
+                    </aside>
+                </div>
+                <section id="team-profile" class="team-profile hidden" aria-live="polite"></section>
+            </section>
+        </main>
+
+        <footer class="site-footer">© 2026 MLeague <span>•</span> Công cụ tạo lịch thi đấu cho mọi giải đấu.</footer>
+    </div>
+
+    <div id="modal-backdrop" class="modal-backdrop hidden">
+        <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+            <div class="modal-header">
+                <div>
+                    <span class="eyebrow">MLeague</span>
+                    <h2 id="modal-title"></h2>
+                </div>
+                <button id="modal-close" class="modal-close" type="button" aria-label="Đóng"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form id="modal-form">
+                <div id="modal-content" class="modal-content"></div>
+                <div class="modal-footer">
+                    <button class="button button-text" id="modal-cancel" type="button">Hủy</button>
+                    <button class="button button-primary" type="submit">Lưu thay đổi</button>
+                </div>
+            </form>
+        </section>
+    </div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="firebase-config.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Hàm kiểm tra dữ liệu hợp lệ cơ bản
+    function isValidLeagueData(data) {
+      return data.keys().hasAll(['name', 'updatedAt']) // Thay bằng các trường bắt buộc của bạn
+        && data.name is string 
+        && data.name.size() > 0 
+        && data.name.size() <= 100; // Giới hạn tên giải tối đa 100 ký tự
+    }
+
+    match /users/{userId}/leagues/{leagueId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow create, update: if request.auth != null 
+        && request.auth.uid == userId
+        && isValidLeagueData(request.resource.data);
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+
+    match /publicLeagues/{shareId} {
+      // Cho phép đọc nếu đã publish
+      allow get: if resource.data.published == true;
+      allow list: if false;
+
+      // Tạo mới: phải là chủ sở hữu, published = true, shareId không quá dài
+      allow create: if request.auth != null
+        && shareId.size() <= 64
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.published == true
+        && isValidLeagueData(request.resource.data);
+
+      // Cập nhật: giữ nguyên ownerUid và kiểm tra dữ liệu
+      allow update: if request.auth != null
+        && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.published is bool
+        && isValidLeagueData(request.resource.data);
+
+      // Xóa
+      allow delete: if request.auth != null
+        && resource.data.ownerUid == request.auth.uid;
+    }
+  }
+}
