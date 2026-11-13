@@ -742,7 +742,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <span>${escapeHtml(second)}</span>
                 </article>`;
             }).join('');
-            winnerRounds.push(`<div class="bracket-round-column"><h4>${roundIndex === roundCount - 1 ? 'Chung kết' : `Vòng ${roundIndex + 1}`}</h4>${cards}</div>`);
+            winnerRounds.push(`<div class="bracket-round-column"><h4>${getBracketRoundName(roundIndex + 1, roundCount)}</h4>${cards}</div>`);
             roundEntries = nextEntries;
         }
 
@@ -780,9 +780,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const rowsPerColumn = size / 2;
         const columns = Array.from({ length: rounds }, (_, roundIndex) => {
             const games = state.bracketGames.filter(game => game.round === roundIndex + 1);
-            const title = roundIndex === rounds - 1
-                ? 'Chung kết'
-                : roundIndex === rounds - 2 ? 'Bán kết' : `Vòng ${roundIndex + 1}`;
+            const title = getBracketRoundName(roundIndex + 1, rounds);
             const pendingGames = games.filter(game => game.home && game.away &&
                 !(Number.isInteger(game.homeScore) && Number.isInteger(game.awayScore))).length;
             const randomGames = games.filter(game => game.randomResult).length;
@@ -2181,6 +2179,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.teams.includes(selected)) teamFilter.value = selected;
     }
 
+    // Trả về tên vòng đấu loại trực tiếp đúng ngữ nghĩa
+    // round: vòng hiện tại (1-indexed), totalRounds: tổng số vòng (không tính tranh hạng ba)
+    function getBracketRoundName(round, totalRounds) {
+        const remaining = totalRounds - round; // số vòng còn lại sau vòng này
+        if (remaining === 0) return 'Chung kết';
+        if (remaining === 1) return 'Bán kết';
+        if (remaining === 2) return 'Tứ kết';
+        return `Vòng ${round}`;
+    }
+
     function renderSchedule() {
         if (activeTeamName && !state.teams.includes(activeTeamName)) activeTeamName = '';
         scheduleView.classList.toggle('team-page-active', Boolean(activeTeamName));
@@ -2542,9 +2550,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="round-heading">
                         <h2>Nhánh ${branchIndex + 1} · ${formatTitle} · ${games.some(game => game.thirdPlace)
                             ? 'Tranh hạng ba'
-                            : branch.format === 'bracket' &&
-                                round === Math.ceil(Math.log2(branch.end - branch.start + 1))
-                                ? 'Chung kết'
+                            : branch.format === 'bracket'
+                                ? getBracketRoundName(round, Math.ceil(Math.log2(branch.end - branch.start + 1)))
                                 : `Vòng ${round}`}</h2>
                         <div class="round-heading-actions">
                             ${branch.format === 'bracket' && !readOnlyView && games.length
@@ -2587,9 +2594,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function advanceFixtureRow(game) {
         const title = game.thirdPlace ? 'Tranh hạng ba' : game.format === 'bracket'
-            ? (game.round === Math.ceil(Math.log2(
+            ? getBracketRoundName(game.round, Math.ceil(Math.log2(
                 state.advanceBranches[game.branchIndex].end - state.advanceBranches[game.branchIndex].start + 1
-            )) ? 'Chung kết' : `Vòng ${game.round}`)
+            )))
             : `Vòng ${game.round}`;
         const schedule = formatMatchDateTime(game.date, game.time);
         const isEditable = game.format === 'bracket' && !readOnlyView;
@@ -2729,7 +2736,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     ...game,
                     phaseOrder: 1,
                     phase: 'Loại trực tiếp',
-                    title: game.round === roundCount ? 'Chung kết' : `Vòng ${game.round}`,
+                    title: getBracketRoundName(game.round, roundCount),
                     position: game.position,
                     schedule: { date: game.date || '', time: game.time || '' },
                     complete: Boolean(game.winner)
@@ -2744,9 +2751,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         phase: `Nhánh ${fixture.branchIndex + 1} · ${branch.format === 'bracket' ? 'Loại trực tiếp' : 'Vòng tròn'}`,
                         title: `${fixture.thirdPlace
                             ? 'Tranh hạng ba'
-                            : branch.format === 'bracket' &&
-                            fixture.round === Math.ceil(Math.log2(branch.end - branch.start + 1))
-                            ? 'Chung kết'
+                            : branch.format === 'bracket'
+                            ? getBracketRoundName(fixture.round, Math.ceil(Math.log2(branch.end - branch.start + 1)))
                             : `Vòng ${fixture.round}`}${fixture.homeAwayEnabled
                                 ? ` · ${fixture.legIndex === 0 ? 'Lượt đi' : 'Lượt về'}`
                                 : ''}`,
@@ -3839,9 +3845,7 @@ document.addEventListener('DOMContentLoaded', () => {
             else if (row.place !== null) placement = `Hạng ${row.place}`;
             const stoppedAt = row.stoppedAt || (row.lastRound === null
                 ? (row.played ? 'Đang thi đấu' : 'Chưa thi đấu')
-                : row.lastRound === roundCount
-                    ? 'Chung kết'
-                    : `Vòng ${row.lastRound}`);
+                : getBracketRoundName(row.lastRound, roundCount));
             return { ...row, placement, stoppedAt };
         });
     }
